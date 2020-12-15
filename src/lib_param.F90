@@ -156,7 +156,7 @@ module lib_param
    !! Contour integral
    integer :: Np_n(2)            ! Number of points for n
    integer :: Np_p(2)            ! Number of points for p
-   integer :: Np_real(11)        ! Number of points for integration over real axis
+   integer :: Np_real            ! Number of points for integration over real axis
    integer :: n_kt               ! Number of kT extending integrations
    integer :: n_poles            ! Number of poles
    real(dp) :: Ec                ! conduction band edge

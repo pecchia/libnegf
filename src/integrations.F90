@@ -797,7 +797,7 @@ contains
        mumax=negf%muref
     endif
 
-    Ntot = negf%Np_real(1)
+    Ntot = negf%Np_real
     !! destroy en_grid from previous calculation, if any
     call destroy_en_grid(negf%en_grid)
     allocate(negf%en_grid(Ntot))
@@ -961,7 +961,7 @@ contains
        mumax=negf%muref
     endif
 
-    Ntot = negf%Np_real(1)
+    Ntot = negf%Np_real
     allocate(negf%en_grid(Ntot))
 
     allocate(pnts(Ntot))
@@ -1022,7 +1022,7 @@ contains
        mumax=negf%muref
     endif
 
-    Ntot = negf%Np_real(1)
+    Ntot = negf%Np_real
     allocate(negf%en_grid(Ntot))
 
     allocate(pnts(Ntot))

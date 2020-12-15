@@ -184,7 +184,7 @@ module libnegf
    !> Number of points for p
    integer(c_int) :: np_p(2)
    !> Number of real axis points
-   integer(c_int) :: np_real(11)
+   integer(c_int) :: np_real
    !> ! Number of kT extending integrations
    integer(c_int) :: n_kt
    !> Number of poles
@@ -1023,7 +1023,7 @@ contains
     read(101,*)  tmp, negf%wght
     read(101,*)  tmp, negf%Np_n(1:2)
     read(101,*)  tmp, negf%Np_p(1:2)
-    read(101,*)  tmp, negf%Np_real(1)
+    read(101,*)  tmp, negf%Np_real
     read(101,*)  tmp, negf%n_kt
     read(101,*)  tmp, negf%n_poles
     read(101,*)  tmp, negf%g_spin
@@ -1386,7 +1386,7 @@ contains
       call contour_int(negf)
     endif
 
-    if (negf%Np_real(1).gt.0) then
+    if (negf%Np_real.gt.0) then
       call real_axis_int_def(negf)
       call real_axis_int(negf)
     endif
@@ -1443,7 +1443,7 @@ contains
       endif
     endif
 
-    if (negf%Np_real(1).gt.0) then
+    if (negf%Np_real.gt.0) then
        if (particle == 1) then
           call real_axis_int_n_def(negf)
        else
