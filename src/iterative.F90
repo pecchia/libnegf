@@ -563,7 +563,7 @@ CONTAINS
          call destroy(Tmp1)
       else
          Gam1%val = 0.0_dp
-         Gam1%val(nn,nn)=negf%deph%bp%coupling(nn)
+         Gam1%val(nn,nn)=negf%bp_deph%coupling(nn)
       end if
 
       do mm = 1, NumOrbs+ncont
@@ -575,7 +575,7 @@ CONTAINS
            call destroy(Tmp2)
         else
            Gam2%val = 0.0_dp
-           Gam2%val(mm,mm)=negf%deph%bp%coupling(mm)
+           Gam2%val(mm,mm)=negf%bp_deph%coupling(mm)
         end if
 
         ! Compute coherent transmission: Tr[Gam1 Gr Gam2 Ga]

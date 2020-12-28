@@ -73,16 +73,10 @@ module lib_param
      complex(dp) :: wght
   end type TEnGrid
 
-  !DAR begin - in Tnegf
   !-----------------------------------------------------------------------------
-
   type :: Tdeph_bp
      real(dp), allocatable, dimension(:) :: coupling
   end type Tdeph_bp
-
-  type :: Tdephasing
-     type(Tdeph_bp) :: bp
-  end type Tdephasing
 
   type Tcontact
     character(132) :: name
@@ -105,22 +99,22 @@ module lib_param
     type(z_DNS) :: SMC      ! Device-Contact Overlap
   end type Tcontact
 
-  type Telectrons
-    integer :: IndexEnergy
-  end type Telectrons
+  !type Toutput
+  !  logical :: tWriteDOS = .false.
+  !  logical :: tDOSwithS = .false.
+  !end type Toutput
 
-  type Toutput
-    logical :: tWriteDOS = .false.
-    logical :: tDOSwithS = .false.
-  end type Toutput
+  !type Ttransport
+  !  type(Telectrons) :: el
+  !  type(Toutput) :: out
+  !end type Ttransport
 
-  type Ttransport
-    type(Telectrons) :: el
-    type(Toutput) :: out
-  end type Ttransport
+  type TObjArray
+    class(Interaction), pointer :: pInter => null()
+  end type TObjArray
+  
+  type(TObjArray), dimension(:), allocatable :: interA
 
-  !-----------------------------------------------------------------------------
-  !DAR - end
 
  !> General libnegf container
  !! Contains input data, runtime quantities and output data
@@ -234,7 +228,8 @@ module lib_param
    logical :: tCalcSelfEnergies = .true.
    logical :: tDephasingVE = .false.
    logical :: tDephasingBP = .false.
-   type(Tdephasing) :: deph
+   ! Buttiker Probes dephasing
+   type(Tdeph_bp) :: bp_deph
 
    ! internal use only
    integer :: readOldSGF
@@ -251,10 +246,10 @@ contains
     type(Tnegf) :: negf
     real(dp),  dimension(:), intent(in) :: coupling
 
-    if (.not.allocated(negf%deph%bp%coupling)) then
-       allocate(negf%deph%bp%coupling(size(coupling)))
+    if (.not.allocated(negf%bp_deph%coupling)) then
+       allocate(negf%bp_deph%coupling(size(coupling)))
     end if
-    negf%deph%bp%coupling = coupling
+    negf%bp_deph%coupling = coupling
 
   end subroutine set_bp_dephasing
 
