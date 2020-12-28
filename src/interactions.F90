@@ -43,9 +43,8 @@ module interactions
     integer :: scba_iter = 0
     !> SCBA Tolerance
     real(dp) :: scba_tol = 1.0d-7
-    !> Number of energy points from integration grid
-    !integer :: en_npoints = 0
-    !> Buffer for Gr
+    !> Energy of the mode (what about wq(k) ??)
+    real(dp) :: wq = 0.0_dp
 
     !> System partitioning (as in TNEGF)
     type(TStruct_info) :: struct
