@@ -223,28 +223,17 @@ module lib_param
    ! Many Body Interactions
    class(Interaction), allocatable :: inter
 
-   !! Output variables: these are filled by internal subroutines to stor
-   !! library output
+   !! Output variables: these arrays are filled by internal subroutines to store
+   !! library outputs
    real(dp), dimension(:,:), allocatable :: tunn_mat
    real(dp), dimension(:,:), allocatable :: curr_mat
    real(dp), dimension(:,:), allocatable :: ldos_mat
    real(dp), dimension(:), allocatable :: currents
 
-   logical :: tOrthonormal = .false.
-   logical :: tOrthonormalDevice = .false.
-   logical :: tTrans = .false.
+   ! These variables need to be done to clean up
    logical :: tCalcSelfEnergies = .true.
-   integer :: NumStates
-   character(len=LST) :: FileName
-   logical :: tManyBody = .false.
-   logical :: tElastic = .true.
    logical :: tDephasingVE = .false.
    logical :: tDephasingBP = .false.
-   logical :: tZeroCurrent = .false.
-   integer :: MaxIter = 1000
-   logical :: tWrite_ldos = .false.
-   logical :: tWrite_negf_params = .false.
-   type(Ttransport) :: trans
    type(Tdephasing) :: deph
 
    ! internal use only
