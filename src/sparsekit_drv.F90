@@ -201,6 +201,7 @@ MODULE sparsekit_drv
   interface trace
      module procedure ztrace_csr
      module procedure ztrace_dns
+     module procedure ztrace_arr
   end interface
   interface getelement
      module procedure rgetelm_csr
@@ -215,8 +216,8 @@ MODULE sparsekit_drv
      module procedure zspectral_dns
   end interface
   interface check_if_hermitian
-     module procedure check_hermitian_csr   
-     module procedure check_hermitian_dns   
+     module procedure check_hermitian_csr
+     module procedure check_hermitian_dns
   end interface
 
   integer, parameter :: MISMATCH = 1
@@ -246,14 +247,14 @@ MODULE sparsekit_drv
       logical, intent(in) :: sorted
       complex(dp) :: res
     end function zgetelm
-     
+
     subroutine dnscsr(nrow, ncol, nnz, aa, nr, bb, colind, rowpnt, ierr)
       import :: dp
       integer, intent(in) :: nrow, ncol
       integer, intent(inout) :: nnz
-      real(dp), intent(in) :: aa(*)  
+      real(dp), intent(in) :: aa(*)
       integer, intent(in) :: nr
-      real(dp), intent(inout) :: bb(*)  
+      real(dp), intent(inout) :: bb(*)
       integer, intent(inout) :: colind(*), rowpnt(*)
       integer, intent(inout) :: ierr
     end subroutine dnscsr
@@ -262,28 +263,28 @@ MODULE sparsekit_drv
       import :: dp
       integer, intent(in) :: nrow, ncol
       integer, intent(inout) :: nnz
-      complex(dp), intent(in) :: aa(*)  
+      complex(dp), intent(in) :: aa(*)
       integer, intent(in) :: nr
-      complex(dp), intent(inout) :: bb(*)  
+      complex(dp), intent(inout) :: bb(*)
       integer, intent(inout) :: colind(*), rowpnt(*)
       integer, intent(inout) :: ierr
     end subroutine zdnscsr
-       
+
     subroutine zcoocsr(nrow, nnz, aa, ia, ja, bb, jb, ib)
       import :: dp
       integer, intent(in) :: nrow, nnz
-      complex(dp), intent(in) :: aa(*)  
+      complex(dp), intent(in) :: aa(*)
       integer, intent(in) :: ia(*), ja(*)
       complex(dp), intent(inout) :: bb(*)
       integer, intent(inout) :: jb(*), ib(*)
     end subroutine zcoocsr
-    
+
     subroutine zcsrdns(nrow, ncol, aa, ja, ia, bb, nr, ierr)
       import :: dp
       integer, intent(in) :: nrow, ncol
-      complex(dp), intent(in) :: aa(*)  
+      complex(dp), intent(in) :: aa(*)
       integer, intent(in) :: ja(*), ia(*)
-      complex(dp), intent(inout) :: bb(*)  
+      complex(dp), intent(inout) :: bb(*)
       integer, intent(inout) :: nr
       integer, intent(inout) :: ierr
     end subroutine zcsrdns
@@ -291,14 +292,14 @@ MODULE sparsekit_drv
     subroutine zcsrcoo(nrow, job, nnz, aa, ja, ia, innz, bb, ib, jb, ierr)
       import :: dp
       integer, intent(in) :: nrow, job, nnz
-      complex(dp), intent(in) :: aa(*)  
+      complex(dp), intent(in) :: aa(*)
       integer, intent(in) :: ja(*), ia(*)
       integer, intent(inout) :: innz
-      complex(dp), intent(inout) :: bb(*)  
+      complex(dp), intent(inout) :: bb(*)
       integer, intent(inout) :: ib(*), jb(*)
       integer, intent(inout) :: ierr
     end subroutine zcsrcoo
-            
+
     subroutine zcsrcsc(nrow, job, ipos, aa, colind, rowpnt, bb, rowind, colpnt)
       import :: dp
       integer, intent(in) :: nrow, job, ipos
@@ -337,7 +338,7 @@ MODULE sparsekit_drv
       integer, intent(in) :: nnz
       integer, intent(inout) :: iw(*), ierr
     end subroutine zamub
-          
+
     subroutine zamubs(nrow, ncol, job, aa, ja, ia, s, bb, jb, ib, cc, jc, ic, nnz, iw, ierr)
       import :: dp
       integer, intent(in) :: nrow, ncol, job
@@ -349,7 +350,7 @@ MODULE sparsekit_drv
       integer, intent(in) :: nnz
       integer, intent(inout) :: iw(*), ierr
     end subroutine zamubs
-          
+
     subroutine aplb(nrow, ncol, job, aa, ja, ia, bb, jb, ib, cc, jc, ic, nnz, iw, ierr)
       import :: dp
       integer, intent(in) :: nrow, ncol, job
@@ -383,7 +384,7 @@ MODULE sparsekit_drv
       integer, intent(in) :: nnz
       integer, intent(inout) :: iw(*), ierr
     end subroutine zaplb
-    
+
     subroutine zaplsb(nrow, ncol, job, aa, ja, ia, s, bb, jb, ib, cc, jc, ic, nnz, iw, ierr)
       import :: dp
       integer, intent(in) :: nrow, ncol, job
@@ -406,7 +407,7 @@ MODULE sparsekit_drv
       integer, intent(in) :: nnz
       integer, intent(inout) :: ierr
     end subroutine zaplb1
-    
+
     subroutine zcplsamub(nrow, ncol, job, aa, ja, ia, s, bb, jb, ib, cc, jc, ic, nnz, iw, ierr)
       import :: dp
       integer, intent(in) :: nrow, ncol, job
@@ -425,7 +426,7 @@ MODULE sparsekit_drv
       complex(dp), intent(in) :: aa(*)
       integer, intent(in) :: ja(*), ia(*)
       integer, intent(inout) :: iw(*)
-      logical, intent(in) :: vals 
+      logical, intent(in) :: vals
     end subroutine zcsort
 
     subroutine ztransp(nrow,ncol,aa,ja,ia,iwk,ierr)
@@ -434,36 +435,36 @@ MODULE sparsekit_drv
       complex(dp), intent(inout) :: aa(*)
       integer, intent(inout) :: ja(*), ia(*)
       integer, intent(inout) :: iwk(*)
-      integer, intent(inout) :: ierr 
+      integer, intent(inout) :: ierr
     end subroutine ztransp
 
     subroutine zsubmat(nrow,job,i1,i2,j1,j2,aa,ja,ia,nr,nc,bb,jb,ib)
       import :: dp
-      integer, intent(in) :: nrow, job, i1, i2, j1, j2 
+      integer, intent(in) :: nrow, job, i1, i2, j1, j2
       complex(dp), intent(in) :: aa(*)
       integer, intent(in) :: ja(*), ia(*)
-      integer, intent(inout) :: nr, nc    
+      integer, intent(inout) :: nr, nc
       complex(dp), intent(inout) :: bb(*)
       integer, intent(inout) :: jb(*), ib(*)
     end subroutine zsubmat
 
     subroutine zcopmat(nrow,aa,ja,ia,bb,jb,ib,job,ierr)
       import :: dp
-      integer, intent(in) :: nrow 
+      integer, intent(in) :: nrow
       complex(dp), intent(in) :: aa(*)
       integer, intent(in) :: ja(*), ia(*)
       complex(dp), intent(inout) :: bb(*)
       integer, intent(inout) :: jb(*), ib(*)
       integer, intent(in) :: job, ierr
     end subroutine zcopmat
-  
+
     subroutine bandwidth(ncol, ja, ia, ml, mu, a_bw, bndav)
       import :: dp
-      integer, intent(in) :: ncol 
+      integer, intent(in) :: ncol
       integer, intent(in) :: ja(*), ia(*)
       integer, intent(inout) :: ml, mu, a_bw, bndav
     end subroutine bandwidth
-   
+
     !call zas1pls2b(A_csr%nrow,A_ncol,1,A_csr%nzval,A_csr%colind,A_csr%rowpnt,s1,s2,&
     !       B_csr%nzval,B_csr%colind,B_csr%rowpnt,C_csr%nzval,C_csr%colind,C_csr%rowpnt,&
     !       C_csr%nnz,iw,ierr)
@@ -482,7 +483,7 @@ MODULE sparsekit_drv
       integer, intent(inout) :: iw(*)
       integer, intent(inout) :: ierr
     end subroutine zas1pls2b
-      
+
     subroutine getdia(nrow, ncol, job, aa, ja, ia, len, dd, idiag, ioff)
       import :: dp
       integer, intent(in) :: nrow, ncol, job
@@ -493,7 +494,7 @@ MODULE sparsekit_drv
       integer, intent(inout) :: idiag(*)
       integer, intent(in) :: ioff
     end subroutine getdia
-    
+
     subroutine zgetdia(nrow, ncol, job, aa, ja, ia, len, dd, idiag, ioff)
       import :: dp
       integer, intent(in) :: nrow, ncol, job
@@ -507,7 +508,7 @@ MODULE sparsekit_drv
 
     !call ziluk(A_csr%nrow, A_csr%nzval, A_csr%colind, A_csr%rowpnt, lfil, &
     !     LU_msr%nzval, LU_msr%index, LU_ju, LU_levs, LU_iwk, w, jw, ierr)
-  end interface      
+  end interface
 
 CONTAINS
   ! -------------------------------------------------------------------------
@@ -2771,8 +2772,8 @@ CONTAINS
 
     IF ((i1.GT.i2).OR.(j1.GT.j2).OR.(i2.GT.A_csr%nrow).OR.(j2.GT.A_csr%ncol)) THEN
        print*, 'ERROR (zextract_csr): bad indeces specification';
-       print*, 'Trying to extract block from matrix',A_csr%nrow,'x',A_csr%ncol  
-       print*, 'Indices Rows',i1,i2,'Cols',j1,j2  
+       print*, 'Trying to extract block from matrix',A_csr%nrow,'x',A_csr%ncol
+       print*, 'Indices Rows',i1,i2,'Cols',j1,j2
        STOP
     ENDIF
 
@@ -2800,9 +2801,9 @@ CONTAINS
 
     IF ((i1.GT.i2).OR.(j1.GT.j2).OR.(i2.GT.A_csr%nrow).OR.(j2.GT.A_csr%ncol)) THEN
        print*, 'ERROR (zextract_dns): bad indeces specification';
-       print*, 'Trying to extract block from matrix',A_csr%nrow,'x',A_csr%ncol  
-       print*, 'Indices Rows',i1,i2,'Cols',j1,j2  
-       STOP 
+       print*, 'Trying to extract block from matrix',A_csr%nrow,'x',A_csr%ncol
+       print*, 'Indices Rows',i1,i2,'Cols',j1,j2
+       STOP
     ENDIF
 
     call create(A_dns,(i2-i1+1),(j2-j1+1))
@@ -3433,7 +3434,7 @@ CONTAINS
     complex(dp) :: trace
 
     integer :: i
-    
+
     trace = (0.d0,0.d0)
     if (present(mask)) then
        if (size(mask) /= mat%nrow) then
@@ -3442,7 +3443,7 @@ CONTAINS
        do i = 1,mat%nrow
           if (mask(i)) then
              trace = trace + mat%val(i,i)
-          end if   
+          end if
        end do
     else
        do i = 1,mat%nrow
@@ -3451,6 +3452,32 @@ CONTAINS
     end if
 
   end function ztrace_dns
+
+!---------------------------------------------
+
+  function ztrace_arr(mat, mask) result (tr)
+    complex(dp), intent(in) :: mat(:,:)
+    logical, intent(in), optional :: mask(:)
+    complex(dp) :: tr
+
+    integer :: ii
+    tr = (0.0_dp, 0.0_dp)
+    if (present(mask)) then
+       if (size(mask) /= size(mat,1)) then
+          stop 'Error in ztrace_csr: size(mask) /= nrow'
+       end if
+       do ii = 1, size(mat,1)
+         if (mask(ii)) then
+           tr = tr + mat(ii, ii)
+         end if
+       end do
+    else
+       do ii = 1, size(mat,1)
+           tr = tr + mat(ii, ii)
+       end do
+    end if
+
+  end function ztrace_arr
 
 !---------------------------------------------
 
