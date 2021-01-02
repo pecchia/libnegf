@@ -37,6 +37,7 @@ module libnegf
  use integrations
  use iso_c_binding
  use system_calls
+ use elph, only : interaction_models
 #:if defined("MPI")
  use libmpifx_module, only : mpifx_comm
 #:endif
@@ -49,8 +50,9 @@ module libnegf
  public :: HAR, eovh, pi, kb, units, set_drop, DELTA_SQ, DELTA_W, DELTA_MINGO ! from ln_constants
  public :: convertCurrent, convertHeatCurrent, convertHeatConductance ! from ln_constants
  public :: Tnegf
- public :: set_bp_dephasing, set_elph_dephasing, set_elph_block_dephasing
- public :: set_elph_s_dephasing, destroy_elph_model
+ public :: set_bp_dephasing
+ public :: set_elph_dephasing, set_elph_block_dephasing, set_elph_s_dephasing
+ public :: interaction_models
  public :: set_clock, write_clock
  public :: writeMemInfo, writePeakInfo
  public :: dns2csr, csr2dns, nzdrop
@@ -217,7 +219,7 @@ contains
   subroutine init_negf(negf)
     type(Tnegf) :: negf
 
-    call set_defaults(negf)
+    call negf%set_defaults()
     negf%form%formatted = .true.
     negf%isSid = .false.
     negf%form%type = "PETSc"
@@ -1491,7 +1493,7 @@ contains
     type(Tnegf) :: negf
 
 
-    if ( allocated(negf%inter) .or. negf%tDephasingBP) then
+    if ( allocated(negf%interArr) .or. negf%tDephasingBP) then
        call compute_meir_wingreen(negf);
     else
        call compute_landauer(negf);
@@ -1743,7 +1745,7 @@ contains
   subroutine print_tnegf(negf)
     type(TNegf) :: negf
 
-    call print_all_vars(negf, 6)
+    call negf%print_all_vars(6)
   end subroutine print_tnegf
 
   !////////////////////////////////////////////////////////////////////////

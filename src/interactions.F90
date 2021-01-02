@@ -1,9 +1,9 @@
 !!--------------------------------------------------------------------------!
 !! libNEGF: a general library for Non-Equilibrium Green's functions.        !
 !! Copyright (C) 2012                                                       !
-!!                                                                          ! 
+!!                                                                          !
 !! This file is part of libNEGF: a library for                              !
-!! Non Equilibrium Green's Function calculation                             ! 
+!! Non Equilibrium Green's Function calculation                             !
 !!                                                                          !
 !! Developers: Alessandro Pecchia, Gabriele Penazzi                         !
 !! Former Conctributors: Luca Latessa, Aldo Di Carlo                        !
@@ -15,11 +15,11 @@
 !!                                                                          !
 !!  You should have received a copy of the GNU Lesser General Public        !
 !!  License along with libNEGF.  If not, see                                !
-!!  <http://www.gnu.org/licenses/>.                                         !  
+!!  <http://www.gnu.org/licenses/>.                                         !
 !!--------------------------------------------------------------------------!
 
 !> The module implements an abstract class to interface different
-!! many body interactions. 
+!! many body interactions.
 
 module interactions
 
@@ -32,17 +32,18 @@ module interactions
   private
 
   public :: interaction
+  public :: TInteractionArray
+  public :: get_max_wq
+  public :: get_max_niter
 
-  type, abstract :: Interaction
-
+  type, abstract :: interaction
+    !> Textual descriptor for output
     character(len=LST) :: descriptor
     !> Maximum number of SCBA iterations. 
     !! corresponds to no iterations (self energy is not calculated)
     integer :: scba_niter = 0
-    !> Keep track of SCBA iteration 
+    !> SCBA iteration (set from outside)
     integer :: scba_iter = 0
-    !> SCBA Tolerance
-    real(dp) :: scba_tol = 1.0d-7
     !> Energy of the mode (what about wq(k) ??)
     real(dp) :: wq = 0.0_dp
 
@@ -51,12 +52,19 @@ module interactions
 
   contains
 
+    procedure, non_overridable :: set_scba_iter    
     procedure(abst_add_sigma_r), deferred :: add_sigma_r
     procedure(abst_get_sigma_n), deferred :: get_sigma_n
     procedure(abst_set_Gr), deferred :: set_Gr
     procedure(abst_set_Gn), deferred :: set_Gn
 
   end type Interaction
+  
+  !-----------------------------------------------------------------------------
+  ! derived type to create array of pointers to objects
+  type TInteractionArray
+    class(Interaction), allocatable :: inter
+  end type TInteractionArray
 
   abstract interface
 
@@ -88,7 +96,7 @@ module interactions
       import :: z_dns
       class(interaction) :: this
       type(z_dns), dimension(:,:), intent(in) :: Gr
-      integer :: en_index
+      integer, intent(in) :: en_index
     end subroutine abst_set_Gr
 
     !> Give the Gn at given energy point to the interaction
@@ -97,22 +105,41 @@ module interactions
       import :: z_dns
       class(interaction) :: this
       type(z_dns), dimension(:,:), intent(in) :: Gn
-      integer :: en_index
+      integer, intent(in) :: en_index
     end subroutine abst_set_Gn
 
-
   end interface
+  
+  contains
 
-    !> Initialize information needed for buffering G on memory or disk
-    !  Now it only pass the number of energy grid points but it 
-    !  could turn in something more complicated (e.g. an energy path object)
-!!$    subroutine init_Gbuffer(this, en_npoints)
-!!$      class(interaction) :: this
-!!$      integer, intent(in) :: en_npoints
-!!$
-!!$      this%en_npoints = en_npoints
-!!$      
-!!$      
-!!$    end subroutine init_Gbuffer
+  subroutine set_scba_iter(this, scba_iter)
+    class(interaction) :: this
+    integer, intent(in) :: scba_iter
+    this%scba_iter = scba_iter
+  end subroutine set_scba_iter
+
+  function get_max_wq(interArr) result(maxwq)
+    type(TInteractionArray), intent(in) :: interArr(:)
+    real(dp) :: maxwq
+    integer :: ii 
+
+    maxwq = 0.0_dp
+    do ii = 1, size(interArr)
+      if (interArr(ii)%inter%wq > maxwq) then
+         maxwq = interArr(ii)%inter%wq   
+      end if
+    end do
+  end function get_max_wq
+
+  function get_max_niter(interArr) result (max_niter)
+    type(TInteractionArray), intent(in) :: interArr(:)
+    integer :: max_niter, ii
+    max_niter = 0
+    do ii = 1, size(interArr)
+      if (interArr(ii)%inter%scba_niter > max_niter) then
+         max_niter = interArr(ii)%inter%scba_niter   
+      end if
+    end do
+  end function get_max_niter
 
 end module interactions
