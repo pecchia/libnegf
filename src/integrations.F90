@@ -1475,7 +1475,7 @@ contains
     if (.not.allocated(negf%interArr)) then
       max_scba_iter = 0
     else
-      max_scba_iter = get_max_niter(negf%interArr
+      max_scba_iter = get_max_niter(negf%interArr)
       call negf%scbaDriver%init(1.0e-7_dp, .false.)
       do scba_iter = 1, max_scba_iter
         call negf%scbaDriver%set_scba_iter(scba_iter, negf%interArr)
