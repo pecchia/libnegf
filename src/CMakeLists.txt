@@ -29,7 +29,8 @@ set(sources-fpp
   interactions.F90
   elphdd.F90
   elphdb.F90
-  elphds.F90)
+  elphds.F90
+  scba.F90)
 
 if(WITH_INELASTIC)
   list(APPEND sources-fpp transform.F90)

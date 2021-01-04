@@ -32,14 +32,12 @@ module integrations
  use sparsekit_drv
  use inversions
  use iterative
- !use iterative_ph
  use mat_def
  use ln_extract
  use contselfenergy
  use clock
- use elph
  use energy_mesh
-
+ use interactions
  implicit none
 
  private
@@ -84,30 +82,6 @@ module integrations
 
  integer, PARAMETER :: VBT=70
 
-!!$ Moved to lib_param: module variables are not thread safe.
-!!$ As the variable en_grid should not be declared here, also
-!!$ the type definition is moved to lib_param
-!!$ !! Structure used to define energy points for the integration
-!!$ !! For every point we define
-!!$ !!     path (1,2 or 3): the energy point belongs to a real axis
-!!$ !!     integration (1), a complex plane integration (2) or a
-!!$ !!     pole summation (3)
-!!$ !!     pt_path: relative point number within a single path
-!!$ !!     pt: absolute point number along the whole integration path
-!!$ !!     cpu: cpu assigned to the calculation of the given energy point
-!!$ !!     Ec: energy value
-!!$ !!     wght: a weight used in final summation to evaluate integrals
-!!$ type TEnGrid
-!!$     integer :: path
-!!$     integer :: pt_path
-!!$     integer :: pt
-!!$     integer :: cpu
-!!$     complex(dp) :: Ec
-!!$     complex(dp) :: wght
-!!$ end type TEnGrid
-
-!!$ type(TEnGrid), dimension(:), allocatable :: en_grid
-
 contains
 
   subroutine destroy_en_grid(en_grid)
@@ -129,6 +103,19 @@ contains
 
   end subroutine write_info
   !-----------------------------------------------------------------------
+
+  subroutine write_real_info(verbose,message,rr)
+    integer, intent(in) :: verbose
+    character(*), intent(in) :: message
+    real(dp), intent(in) :: rr
+
+     if (id0 .and. verbose.gt.30) then
+       write(6,'(a,a,es12.3)') message,': ',rr
+     end if
+
+  end subroutine write_real_info
+
+  !-----------------------------------------------------------------------
   subroutine write_point(verbose,gridpn,Npoints)
     integer, intent(in) :: verbose
     type(TEnGrid), intent(in) :: gridpn
@@ -140,6 +127,7 @@ contains
     endif
 
   end subroutine write_point
+  !-----------------------------------------------------------------------
 
   subroutine write_message_clock(verbose,message)
     integer, intent(in) :: verbose
@@ -150,6 +138,7 @@ contains
     end if
 
   end subroutine write_message_clock
+  !-----------------------------------------------------------------------
 
   subroutine write_end_clock(verbose)
     integer, intent(in) :: verbose
@@ -171,7 +160,7 @@ contains
     integer :: Nstep, i, i1, l, kb, ke
     integer :: outer, ncont
 
-    real(dp) :: ncyc
+    real(dp) :: ncyc, scba_error
     complex(dp) :: Ec
     character(6) :: ofKP
     character(1) :: ofSp
@@ -193,7 +182,7 @@ contains
        Ec = negf%en_grid(i)%Ec + j*negf%dos_delta
        negf%iE = negf%en_grid(i)%pt
 
-       call compute_Gr(negf, outer, ncont, Ec, Gr)
+       call compute_Gr(negf, outer, ncont, Ec, Gr, scba_error)
 
        call log_allocate(diag, Gr%nrow)
        call getdiag(Gr,diag)
@@ -239,7 +228,7 @@ contains
     integer :: i, Ntot, Npoles, ioffs
     real(dp), DIMENSION(:), ALLOCATABLE :: wght,pnts   ! Gauss-quadrature points
     real(dp) :: Omega, Lambda
-    real(dp) :: muref, kbT, Emin
+    real(dp) :: muref, kbT, Emin, scba_error
 
     complex(dp) :: z1,z2,z_diff, zt
     complex(dp) :: Ec, ff
@@ -713,7 +702,7 @@ contains
 
      type(z_CSR) :: GreenR, TmpMt
      integer :: i, i1, ncont, Ntot, outer
-     real(dp) :: ncyc
+     real(dp) :: ncyc, scba_error
      complex(dp) :: Ec, zt
 
      ncont = negf%str%num_conts
@@ -735,14 +724,12 @@ contains
 
         if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Green`s funct ')
 
-        call compute_Gr(negf, outer, ncont, Ec, GreenR)
+        call compute_Gr(negf, outer, ncont, Ec, GreenR, scba_error)
 
         if (id0.and.negf%verbose.gt.VBT) call write_clock
 
-        if (allocated(negf%inter)) then
-          if (negf%inter%scba_iter > 0) then
-            call write_info(negf%verbose,'SCBA iterations',negf%inter%scba_iter)
-          end if
+        if (allocated(negf%interArr)) then
+          call write_real_info(negf%verbose,'SCBA error', scba_error)
         end if
 
         if(negf%DorE.eq.'E') zt = zt * Ec
@@ -797,7 +784,7 @@ contains
        mumax=negf%muref
     endif
 
-    Ntot = negf%Np_real(1)
+    Ntot = negf%Np_real
     !! destroy en_grid from previous calculation, if any
     call destroy_en_grid(negf%en_grid)
     allocate(negf%en_grid(Ntot))
@@ -855,7 +842,7 @@ contains
     integer :: i, i1, j1, outer, ncont
 
     real(dp), DIMENSION(:), allocatable :: frm_f
-    real(dp) :: ncyc, Er
+    real(dp) :: ncyc, Er, scba_error
 
     complex(dp) :: zt
     complex(dp) :: Ec
@@ -887,14 +874,12 @@ contains
 
        if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Green`s funct ')
 
-       call compute_Gn(negf, outer, ncont, Ec, frm_f, Gn)
+       call compute_Gn(negf, outer, ncont, Ec, frm_f, Gn, scba_error)
 
        if (id0.and.negf%verbose.gt.VBT) call write_clock
 
-       if (allocated(negf%inter)) then
-         if (negf%inter%scba_iter > 0) then
-           call write_info(negf%verbose,'SCBA iterations',negf%inter%scba_iter)
-         end if
+       if (allocated(negf%interArr)) then
+         call write_real_info(negf%verbose,'SCBA error',scba_error)
        end if
 
        if(negf%DorE.eq.'E') zt = zt * Er
@@ -961,7 +946,7 @@ contains
        mumax=negf%muref
     endif
 
-    Ntot = negf%Np_real(1)
+    Ntot = negf%Np_real
     allocate(negf%en_grid(Ntot))
 
     allocate(pnts(Ntot))
@@ -1022,7 +1007,7 @@ contains
        mumax=negf%muref
     endif
 
-    Ntot = negf%Np_real(1)
+    Ntot = negf%Np_real
     allocate(negf%en_grid(Ntot))
 
     allocate(pnts(Ntot))
@@ -1199,16 +1184,20 @@ contains
   !  --i [ /                           ]
   !-----------------------------------------------------------------------
   !-----------------------------------------------------------------------
-  ! Contour integration for density matrix
-  ! DOES INCLUDE FACTOR 2 FOR SPIN !!
+  ! Real axis integration for Landauer or Meir-Wingreen
   !-----------------------------------------------------------------------
   subroutine tunneling_int_def(negf)
     type(Tnegf) :: negf
 
     integer :: i, ncont, Nsteps
+    real(dp) :: wqmax
 
-    Nsteps=NINT((negf%Emax-negf%Emin)/negf%Estep) + 1
-    !! Destroy en_grid from previous calculation, if any
+    if (allocated(negf%interArr)) then
+      Nsteps=nint((negf%Emax-negf%Emin+get_max_wq(negf%interArr))/negf%Estep) + 1
+    else
+      Nsteps=nint((negf%Emax-negf%Emin)/negf%Estep) + 1
+    end if
+
     call destroy_en_grid(negf%en_grid)
     allocate(negf%en_grid(Nsteps))
 
@@ -1303,13 +1292,10 @@ contains
 
        Ec = negf%en_grid(i)%Ec
        negf%iE = negf%en_grid(i)%pt
-       negf%trans%el%IndexEnergy = i !! DAR
 
        if(negf%tCalcSelfEnergies) then
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
-          negf%tTrans=.true.
           call compute_contacts(Ec+j*negf%delta,negf,ncyc,Tlc,Tcl,SelfEneR,GS)
-          negf%tTrans=.false.
           if (id0.and.negf%verbose.gt.VBT) call write_clock
        end if
 
@@ -1366,17 +1352,18 @@ contains
   !---------------------------------------------------------------------------
   subroutine meir_wingreen(negf, fixed_occupations)
     type(Tnegf) :: negf
+    real(dp), dimension(:), optional :: fixed_occupations
 
     integer :: scba_iter, i1
     real(dp) :: ncyc
     Type(z_DNS), Dimension(MAXNCONT) :: SelfEneR, Tlc, Tcl, GS
     Real(dp), Dimension(:), allocatable :: curr_mat
-    real(dp), dimension(:), allocatable, optional :: fixed_occupations
     real(dp), dimension(:), allocatable :: frm
     integer :: size_ni, ii, Nstep, outer, ncont, npl, j1, icont, jj
     complex(dp) :: Ec
     real(dp) :: scba_error
-    Type(z_CSR) :: Gn, Gn_previous
+    integer :: scba_niter
+    Type(z_CSR) :: Gn
 
     size_ni = size(negf%ni)
     ! Don't need outer blocks
@@ -1390,15 +1377,14 @@ contains
     end if
     negf%curr_mat = 0.0_dp
     call log_allocate(frm, ncont)
+    ! Fixed occupations can be used to get a transmission
     if (present(fixed_occupations)) then
       frm = fixed_occupations
     end if
 
-    !call create_SGF_SE(negf)
-    !call read_SGF_SE(negf)
-
     negf%readOldSGF = negf%readOldT_SGFs
-    !! Loop on energy points
+
+    !! Loop over energy points
     do ii = 1, Nstep
 
       call write_point(negf%verbose, negf%en_grid(ii), size(negf%en_grid))
@@ -1406,7 +1392,6 @@ contains
       if (negf%en_grid(ii)%cpu /= id) cycle
       Ec = negf%en_grid(ii)%Ec
       negf%iE = negf%en_grid(ii)%pt
-      negf%trans%el%IndexEnergy=ii  !DAR
 
       if (.not. present(fixed_occupations)) then
         do j1 = 1,ncont
@@ -1416,46 +1401,34 @@ contains
 
       if(negf%tCalcSelfEnergies) then
          if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
-         negf%tTrans=.true.
          call compute_contacts(Ec+j*negf%delta, negf, ncyc, Tlc, Tcl, SelfEneR, GS)
-         negf%tTrans=.false.
          if (id0.and.negf%verbose.gt.VBT) call write_clock
       end if
 
       ! Calculate the SCBA before meir-wingreen current so el-ph self-energies are stored
-      if (allocated(negf%inter)) then
+      if (allocated(negf%interArr)) then
 
-         do scba_iter = 0, negf%inter%scba_niter
-            negf%inter%scba_iter = scba_iter
+         call negf%scbaDriver%init(1.0e-7_dp, .false.)
+         scba_niter = get_max_niter(negf%interArr)
+
+         do scba_iter = 0, scba_niter
+
+            call negf%scbaDriver%set_scba_iter(scba_iter, negf%interArr)
 
             call calculate_Gn_neq_components(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,Gn,outer)
 
-            if (negf%inter%scba_iter.ne.0) then
-               scba_error = maxval(abs(Gn%nzval - Gn_previous%nzval))
+            call negf%scbaDriver%check_Mat_convergence(Gn)
 
-               if (scba_error < negf%inter%scba_tol) then
-                  call destroy(Gn)
-                  exit
-               end if
-               call destroy(Gn_previous)
-            end if
-            call clone(Gn,Gn_previous)
+            if (negf%scbaDriver%is_converged()) exit
+
             call destroy(Gn)
          enddo
 
-         call destroy(Gn_previous)
+         call negf%scbaDriver%destroy()
 
-         if (id0) then
-           if (scba_error < negf%inter%scba_tol) then
-              write(*,*) "SCBA loop converged in",negf%inter%scba_iter,&
-                    & " iterations with error",negf%inter%scba_tol
-           else
-              write(*,*) "WARNING: SCBA exit with error ",scba_error, &
-                    & "  > ",negf%inter%scba_tol
-           end if
-         end if
       endif
 
+      ! Compute currents based on computed components
       call iterative_meir_wingreen(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,curr_mat)
 
       negf%curr_mat(ii,:) = curr_mat(:) * negf%wght
@@ -1479,18 +1452,17 @@ contains
   !  working arrays. This routine is used in contour integration and DOS and
   !
   !---------------------------------------------------------------------------
-  subroutine compute_Gr(negf, outer, ncont, Ec, Gr)
+  subroutine compute_Gr(negf, outer, ncont, Ec, Gr, scba_error)
     type(Tnegf), intent(inout) :: negf
-    Type(z_CSR), intent(out) :: Gr
     complex(dp), intent(in) :: Ec
     integer, intent(in) :: outer, ncont
+    Type(z_CSR), intent(out) :: Gr
+    real(dp), intent(out) :: scba_error
 
-    integer :: scba_iter, i1
+    integer :: scba_iter, max_scba_iter, i1
     real(dp) :: ncyc
     Type(z_DNS), Dimension(MAXNCONT) :: SelfEneR, Tlc, Tcl, GS
 
-    real(dp) :: scba_error
-    Type(z_CSR) :: Gr_previous
 
     negf%readOldSGF = negf%readOldDM_SGFs
 
@@ -1498,26 +1470,25 @@ contains
 
     call calculate_Gr(negf,Ec,SelfEneR,Tlc,Tcl,GS,Gr,outer)
 
-    if (allocated(negf%inter)) then
-      if (negf%inter%scba_niter /= 0) then
-        call clone(Gr,Gr_previous)
+    scba_error = 0.0_dp
 
-        do scba_iter = 1, negf%inter%scba_niter
-          negf%inter%scba_iter = scba_iter
-          call destroy(Gr)
-          call calculate_Gr(negf,Ec,SelfEneR,Tlc,Tcl,GS,Gr,outer)
-
-          scba_error = maxval(abs(Gr%nzval - Gr_previous%nzval))
-
-          if (scba_error .lt. negf%inter%scba_tol) then
-            exit
-          end if
-
-          call destroy(Gr_previous)
-          call clone(Gr,Gr_previous)
-        end do
-      end if
+    if (.not.allocated(negf%interArr)) then
+      max_scba_iter = 0
+    else
+      max_scba_iter = get_max_niter(negf%interArr)
+      call negf%scbaDriver%init(1.0e-7_dp, .false.)
+      do scba_iter = 1, max_scba_iter
+        call negf%scbaDriver%set_scba_iter(scba_iter, negf%interArr)
+        call negf%scbaDriver%check_Mat_convergence(Gr)
+        if (negf%scbaDriver%is_converged()) exit
+        call destroy(Gr)
+        call calculate_Gr(negf,Ec,SelfEneR,Tlc,Tcl,GS,Gr,outer)
+      enddo
+      scba_error = negf%scbaDriver%scba_err
+      call negf%scbaDriver%destroy()
     end if
+
+    call destroy(Gr)
 
     do i1=1,ncont
       call destroy(Tlc(i1),Tcl(i1),SelfEneR(i1),GS(i1))
@@ -1533,22 +1504,18 @@ contains
   !  working arrays.
   !
   !-----------------------------------------------------------------------------
-  subroutine compute_Gn(negf, outer, ncont, Ec, frm, Gn)
+  subroutine compute_Gn(negf, outer, ncont, Ec, frm, Gn, scba_error)
     type(Tnegf), intent(inout) :: negf
-    Type(z_CSR), intent(out) :: Gn
+    integer, intent(in) :: outer, ncont
     complex(dp), intent(in) :: Ec
     real(dp), dimension(:), intent(in) :: frm
+    Type(z_CSR), intent(out) :: Gn
+    real(dp), intent(out) :: scba_error
 
-    integer, intent(in) :: outer, ncont
-    integer :: scba_iter, i1, max_scba_iter
+    integer :: scba_iter, max_scba_iter, i1
     real(dp) :: ncyc
     Type(z_DNS), Dimension(MAXNCONT) :: SelfEneR, Tlc, Tcl, GS
     real(dp) :: Er
-
-    !DAR begin - compute_Gr
-    real(dp) :: scba_error
-    Type(z_CSR) :: Gn_previous
-    !DAR end
 
     negf%readOldSGF = negf%readOldDM_SGFs
     Er = real(Ec,dp)
@@ -1556,26 +1523,27 @@ contains
 
     call calculate_Gn_neq_components(negf, Er, SelfEneR, Tlc, Tcl, GS, frm, Gn, outer)
 
+    scba_error = 0.0_dp
     ! In case of interactions (only elastic supported now) we go into
     ! the Self Consistent Born Approximation loop.
-    if (.not.allocated(negf%inter)) then
+    if (.not.allocated(negf%interArr)) then
       max_scba_iter = 0
     else
-      max_scba_iter = negf%inter%scba_niter
-      negf%inter%scba_iter = 0
+      max_scba_iter = get_max_niter(negf%interArr)
+      call negf%scbaDriver%init(1.0e-7_dp, .false.)
+
+      do scba_iter = 1, max_scba_iter
+        call negf%scbaDriver%set_scba_iter(scba_iter, negf%interArr)
+        call negf%scbaDriver%check_Mat_convergence(Gn)
+        if (negf%scbaDriver%is_converged()) exit
+        call destroy(Gn)
+        call calculate_Gn_neq_components(negf, Er, SelfEneR, Tlc, Tcl, GS, frm, Gn, outer)
+      enddo
+      scba_error = negf%scbaDriver%scba_err
+      call negf%scbaDriver%destroy()
     end if
 
-    do scba_iter = 1, max_scba_iter
-      negf%inter%scba_iter = scba_iter
-      call clone(Gn,Gn_previous)
-      call destroy(Gn)
-      call calculate_Gn_neq_components(negf, Er, SelfEneR, Tlc, Tcl, GS, frm, Gn, outer)
-      scba_error = maxval(abs(Gn%nzval - Gn_previous%nzval))
-      call destroy(Gn_previous)
-      if (scba_error .lt. negf%inter%scba_tol) then
-        exit
-      end if
-    enddo
+    call destroy(Gn)
 
     do i1=1,ncont
       call destroy(Tlc(i1),Tcl(i1),SelfEneR(i1),GS(i1))

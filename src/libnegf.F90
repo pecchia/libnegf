@@ -37,6 +37,7 @@ module libnegf
  use integrations
  use iso_c_binding
  use system_calls
+ use elph, only : interaction_models
 #:if defined("MPI")
  use libmpifx_module, only : mpifx_comm
 #:endif
@@ -49,8 +50,9 @@ module libnegf
  public :: HAR, eovh, pi, kb, units, set_drop, DELTA_SQ, DELTA_W, DELTA_MINGO ! from ln_constants
  public :: convertCurrent, convertHeatCurrent, convertHeatConductance ! from ln_constants
  public :: Tnegf
- public :: set_bp_dephasing, set_elph_dephasing, set_elph_block_dephasing
- public :: set_elph_s_dephasing, destroy_elph_model
+ public :: set_bp_dephasing
+ public :: set_elph_dephasing, set_elph_block_dephasing, set_elph_s_dephasing
+ public :: interaction_models
  public :: set_clock, write_clock
  public :: writeMemInfo, writePeakInfo
  public :: dns2csr, csr2dns, nzdrop
@@ -184,7 +186,7 @@ module libnegf
    !> Number of points for p
    integer(c_int) :: np_p(2)
    !> Number of real axis points
-   integer(c_int) :: np_real(11)
+   integer(c_int) :: np_real
    !> ! Number of kT extending integrations
    integer(c_int) :: n_kt
    !> Number of poles
@@ -217,7 +219,7 @@ contains
   subroutine init_negf(negf)
     type(Tnegf) :: negf
 
-    call set_defaults(negf)
+    call negf%set_defaults()
     negf%form%formatted = .true.
     negf%isSid = .false.
     negf%form%type = "PETSc"
@@ -1023,7 +1025,7 @@ contains
     read(101,*)  tmp, negf%wght
     read(101,*)  tmp, negf%Np_n(1:2)
     read(101,*)  tmp, negf%Np_p(1:2)
-    read(101,*)  tmp, negf%Np_real(1)
+    read(101,*)  tmp, negf%Np_real
     read(101,*)  tmp, negf%n_kt
     read(101,*)  tmp, negf%n_poles
     read(101,*)  tmp, negf%g_spin
@@ -1386,7 +1388,7 @@ contains
       call contour_int(negf)
     endif
 
-    if (negf%Np_real(1).gt.0) then
+    if (negf%Np_real.gt.0) then
       call real_axis_int_def(negf)
       call real_axis_int(negf)
     endif
@@ -1443,7 +1445,7 @@ contains
       endif
     endif
 
-    if (negf%Np_real(1).gt.0) then
+    if (negf%Np_real.gt.0) then
        if (particle == 1) then
           call real_axis_int_n_def(negf)
        else
@@ -1491,7 +1493,7 @@ contains
     type(Tnegf) :: negf
 
 
-    if ( allocated(negf%inter) .or. negf%tDephasingBP) then
+    if ( allocated(negf%interArr) .or. negf%tDephasingBP) then
        call compute_meir_wingreen(negf);
     else
        call compute_landauer(negf);
@@ -1743,7 +1745,7 @@ contains
   subroutine print_tnegf(negf)
     type(TNegf) :: negf
 
-    call print_all_vars(negf, 6)
+    call negf%print_all_vars(6)
   end subroutine print_tnegf
 
   !////////////////////////////////////////////////////////////////////////
