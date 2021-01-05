@@ -1488,8 +1488,6 @@ contains
       call negf%scbaDriver%destroy()
     end if
 
-    call destroy(Gr)
-
     do i1=1,ncont
       call destroy(Tlc(i1),Tcl(i1),SelfEneR(i1),GS(i1))
     enddo
@@ -1542,8 +1540,6 @@ contains
       scba_error = negf%scbaDriver%scba_err
       call negf%scbaDriver%destroy()
     end if
-
-    call destroy(Gn)
 
     do i1=1,ncont
       call destroy(Tlc(i1),Tcl(i1),SelfEneR(i1),GS(i1))
