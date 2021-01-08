@@ -200,6 +200,9 @@ module lib_param
     type(Tphph) :: phph           ! phonon-phonon data
 
     type(mesh) :: emesh           ! energy mesh for adaptive Simpson
+    ! Array to store kpoints and kweights
+    real(dp), allocatable, dimension(:,:) :: kpoints
+    real(dp), allocatable, dimension(:) :: kweights
 
     ! Many Body Interactions as array of pointers
     type(TInteractionArray), dimension(:), allocatable :: interArr

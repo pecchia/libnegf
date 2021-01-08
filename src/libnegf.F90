@@ -61,6 +61,7 @@ module libnegf
 #:if defined("MPI")
  public :: set_energy_comm, set_kpoint_comm, set_cart_comm
  public :: negf_mpi_init, negf_cart_init !from mpi_globals
+ public :: set_kpoints
 #:endif
  public :: set_mpi_bare_comm
 
@@ -552,6 +553,21 @@ contains
     end do
 
   end subroutine init_contacts
+
+  subroutine set_kpoints(negf, kpoints, kweights)
+    type(Tnegf) :: negf
+    real(dp), intent(in) :: kpoints(:,:)
+    real(dp), intent(in) :: kweights(:)
+
+    if (size(kpoints,2) /= size(kweights)) then
+       STOP 'Error: size of kpoints do not match'
+    end if      
+    call log_allocate(negf%kpoints(3,size(kweights)))
+    negf%kpoints = kpoints
+    call log_allocate(negf%kweights(size(kweights))
+    negf%kweights = kweights
+
+  end subroutine set_kpoints
 
   !!-------------------------------------------------------------------
   !! Get/Set parameters container
@@ -1117,6 +1133,13 @@ contains
     if (allocated(negf%currents)) then
       call log_deallocate(negf%currents)
     end if
+    if (allocated(negf%kpoints)) then
+      call log_deallocate(negf%kpoints)
+    end if
+    if (allocated(negf%kweights)) then
+      call log_deallocate(negf%kweights)
+    end if
+
     call destroy_DM(negf)
     call destroy_matrices(negf)
     call destroy_surface_green_cache(negf)
