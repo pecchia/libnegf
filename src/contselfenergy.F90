@@ -213,10 +213,6 @@ contains
 
     if (id0.and.verbose.gt.VBT) call write_clock
 
-    !if (avncyc.gt.0.and.id0.and.verbose.gt.VBT) then
-    !   write(*,*) 'Number of iterations:',avncyc
-    !endif
-
   end subroutine surface_green
   !---------------------------------------------------------------------------------------
   ! --------------------------------------------------------------------
@@ -301,14 +297,12 @@ contains
     Type(z_DNS) :: GS_d
     Type(z_CSR) :: TpMt
 
-    Integer :: nbl, ncont, i, l
+    Integer :: ncont, i, l
     Real(dp) :: avncyc
 
-    nbl = pnegf%str%num_PLs
     ncont = pnegf%str%num_conts
-    avncyc = 0
+    ncyc = 0
 
-    STOP 'Internal error: HMC has been changed to dns format'
     ! -----------------------------------------------------------------------
     !  Calculation of contact self-energies
     ! -----------------------------------------------------------------------
@@ -319,7 +313,7 @@ contains
     do i= 1,ncont
        pnegf%activecont=i
 
-       call surface_green(Ec,pnegf%cont(i)%HC,pnegf%cont(i)%SC,pnegf,ncyc,GS_d)
+       call surface_green(Ec,pnegf%cont(i)%HC,pnegf%cont(i)%SC,pnegf,avncyc,GS_d)
 
        l = nzdrop(GS_d,EPS)
 
@@ -329,11 +323,7 @@ contains
 
        call destroy(GS_d)
 
-       avncyc = avncyc + ncyc
-
-       !call prealloc_sum(pnegf%HMC(i),pnegf%SMC(i),(-1.d0, 0.d0),Ec,Tlc(i))
-
-       !call prealloc_sum(pnegf%HMC(i),pnegf%SMC(i),(-1.d0, 0.d0),conjg(Ec),TpMt)
+       ncyc = ncyc + avncyc*0.5
 
        call zdagger(TpMt,Tcl(i))
 
@@ -356,13 +346,11 @@ contains
 
     Type(z_DNS) :: TpMt
 
-    Integer :: nbl, ncont, i, j1,j2  !debug j1,j2 for debug
-    Integer :: ngs                                                          !DAR
-    Real(dp) :: avncyc
-
-    nbl = pnegf%str%num_PLs
+    Integer :: ncont, i
+    real(dp) :: avncyc
+   
     ncont = pnegf%str%num_conts
-    avncyc = 0
+    ncyc = 0
 
     ! -----------------------------------------------------------------------
     !  Calculation of contact self-energies
@@ -375,9 +363,9 @@ contains
 
        pnegf%activecont=i
 
-       call surface_green(Ec,pnegf%cont(i)%HC,pnegf%cont(i)%SC,pnegf,ncyc,GS(i))
+       call surface_green(Ec,pnegf%cont(i)%HC,pnegf%cont(i)%SC,pnegf,avncyc,GS(i))
 
-       avncyc = avncyc + ncyc
+       ncyc = ncyc + avncyc*0.5
 
        call prealloc_sum(pnegf%cont(i)%HMC,pnegf%cont(i)%SMC,(-1.d0, 0.d0),Ec,Tlc(i))
 
