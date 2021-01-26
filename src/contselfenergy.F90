@@ -36,13 +36,14 @@ module ContSelfEnergy
  use clock
  use mpi_globals
  use complexbands
+ use ln_cache, only : TMatLabel
 #:if defined("MPI")
  use libmpifx_module, only : mpifx_reduceip
 #:endif
  implicit none
  private
 
- integer, PARAMETER :: VBT=70                                      !DAR 99 -> 70
+ integer, PARAMETER :: VBT=70
 
   public :: surface_green
   public :: SelfEnergy
@@ -80,7 +81,7 @@ contains
     complex(kind=dp), DIMENSION(:,:), allocatable :: Ao,Bo,Co,Go
     type(z_DNS) :: gt
 
-    integer :: i,i1,n0,n1,n2,n3,n4,nd,npl,ngs,nkp,nsp
+    integer :: ii,i1,n0,n1,n2,n3,n4,nd,npl,ngs
     integer :: pnt,ncyc,nfc,verbose,contdim,surfdim
     integer :: flag            ! flag=0 Load contact gs
                                ! flag=1 Compute
@@ -88,19 +89,23 @@ contains
     real(kind=dp) :: dens
     character(10) :: ofpnt
     logical :: lex
+    type(TMatLabel) :: label
 
     pnt = pnegf%iE    ! Step of the energy integration
-    i = pnegf%activecont
-    nsp = pnegf%spin
-    nkp = pnegf%kpoint
+    ii = pnegf%activecont
+    label%kpoint = pnegf%ikpoint
+    label%energy_point = pnt
+    label%spin = pnegf%spin
+    label%row_block = ii
+    label%col_block = 0
+
     flag = pnegf%ReadOldSGF
     verbose = pnegf%verbose
-    contdim = pnegf%str%cont_dim(i)
-    surfdim = pnegf%str%mat_C_Start(i) - pnegf%str%mat_B_Start(i)
-    ! ngs space for surface + 1 PL
-    !   +--------+-----+-----+
+    contdim = pnegf%str%cont_dim(ii)
+    surfdim = pnegf%str%mat_C_Start(ii) - pnegf%str%mat_B_Start(ii)
+
     !      Surf    PL1   PL2
-    ! contdim = surfdim + 2 PL => 
+    ! contdim = surfdim + 2 PL =>
     ! ngs = surfdim + PL = surfdim + (contdim-surfdim)/2
     ngs = (surfdim + contdim)/2
 
@@ -111,7 +116,7 @@ contains
     if (pnt.gt.999.and.pnt.le.9999) write(ofpnt,'(i4.4)') pnt
     if (pnt.gt.9999.and.pnt.le.99999) write(ofpnt,'(i5.5)') pnt
 
-    lex = pnegf%surface_green_cache%is_cached(contact=i, nkp=nkp, pnt=pnt, nsp=nsp)
+    lex = pnegf%surface_green_cache%is_cached(label)
 
     if (.not.lex .and. flag.eq.0) then
         flag = 2
@@ -127,9 +132,9 @@ contains
     GS%val=(0.D0,0.D0)
 
     !.......... Ficticious contact ....................
-    if(pnegf%cont(i)%FictCont) then
+    if(pnegf%cont(ii)%FictCont) then
 
-       dens=pi*pnegf%cont(i)%contact_DOS
+       dens=pi*pnegf%cont(ii)%contact_DOS
        nfc=nfc+1
        do i1 = 1,ngs
           GS%val(i1,i1)=-j*dens
@@ -148,7 +153,7 @@ contains
        n2 = n0+npl                !end of half real contact
        n3 = n2+1                  !start of the second half real contact
        n4 = contdim               !end of second half real contact
-       
+
        if(flag.ge.1) then
 
           call log_allocate(Ao,npl,npl)
@@ -196,13 +201,13 @@ contains
           !*** save in file ***
           if (flag.eq.2) then
 
-            call pnegf%surface_green_cache%add(GS, i, nkp, pnt, nsp)
+            call pnegf%surface_green_cache%add(GS, label)
 
           endif
 
        else         !*** load from file ***
 
-         call pnegf%surface_green_cache%retrieve(GS, i, nkp, pnt, nsp)
+         call pnegf%surface_green_cache%retrieve(GS, label)
 
        endif
 
@@ -226,11 +231,11 @@ contains
     complex(dp), parameter :: zero = (0.d0,0.d0) ! MATRIX MULT.
     complex(dp), ALLOCATABLE, DIMENSION(:,:) :: Ao_s, A1, B1, C1
     complex(dp), ALLOCATABLE, DIMENSION(:,:) :: GoXCo
-    complex(dp), ALLOCATABLE, DIMENSION(:,:) :: GoXBo, Self 
+    complex(dp), ALLOCATABLE, DIMENSION(:,:) :: GoXBo, Self
     integer :: i1, err
     logical :: okCo = .false.
 
-    call log_allocate(Ao_s, n, n) 
+    call log_allocate(Ao_s, n, n)
     Ao_s=Ao;
 
     do i1 = 1, 300
@@ -241,19 +246,19 @@ contains
 
       call log_allocate(C1, n, n)
       call ZGEMM('N','N',n,n,n,  one, Co, n, GoXCo, n, zero, C1, n)
-      
+
       if (maxval(abs(C1)).le.SGFACC) then
          if (okCo) then
             call log_deallocate(GoXCo)
             call log_deallocate(C1)
             exit;
          else
-            okCo = .true.   
+            okCo = .true.
          endif
       else
-         okCo = .false.   
+         okCo = .false.
       endif
-      
+
       call log_allocate(Self, n, n)
       call ZGEMM('N','N',n,n,n, one, Bo, n, GoXCo, n, zero, Self, n)
       call log_deallocate(GoXCo)
@@ -270,13 +275,13 @@ contains
       call log_deallocate(B1)
 
       call ZGEMM('N','N',n,n,n, -one, Co, n, GoXBo, n, one, Ao, n)
-     
+
       Co = C1
       call log_deallocate(C1)
       call log_deallocate(GoXBo)
 
     end do
-        
+
     ncyc=i1
 
     call compGreen(Go,Ao_s,n)
@@ -348,7 +353,7 @@ contains
 
     Integer :: ncont, i
     real(dp) :: avncyc
-   
+
     ncont = pnegf%str%num_conts
     ncyc = 0
 

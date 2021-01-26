@@ -140,7 +140,7 @@ module libnegf
    !> Spin component (for io)
    integer(c_int)  :: spin
    !> k-point index (for io)
-   integer(c_int) :: kpoint
+   integer(c_int) :: ikpoint
    !> Spin degeneracy
    real(c_double) :: g_spin
    !> Imaginary delta
@@ -554,18 +554,25 @@ contains
 
   end subroutine init_contacts
 
-  subroutine set_kpoints(negf, kpoints, kweights)
+  !> subroutine used to setup kpoints
+  !  kpoints(:)  kweights(:)  are global
+  !  kproc(:) is a local array storing the local indices
+  subroutine set_kpoints(negf, kpoints, kweights, kproc)
     type(Tnegf) :: negf
     real(dp), intent(in) :: kpoints(:,:)
     real(dp), intent(in) :: kweights(:)
+    real(dp), intent(in) :: kproc(:)
 
     if (size(kpoints,2) /= size(kweights)) then
        STOP 'Error: size of kpoints do not match'
-    end if      
-    call log_allocate(negf%kpoints(3,size(kweights)))
+    end if
+    call log_allocate(negf%kpoints,3,size(kweights))
     negf%kpoints = kpoints
-    call log_allocate(negf%kweights(size(kweights))
+    call log_allocate(negf%kweights,size(kweights))
     negf%kweights = kweights
+
+    call log_allocate(negf%kproc,size(kproc))
+    negf%kproc = kproc
 
   end subroutine set_kpoints
 
@@ -625,7 +632,7 @@ contains
     params%eneconv = negf%eneconv
     params%spin = negf%spin
     params%wght = negf%wght
-    params%kpoint = negf%kpoint
+    params%ikpoint = negf%ikpoint
     params%DorE = negf%DorE
     params%min_or_max = negf%min_or_max
     params%isSid = negf%isSid
@@ -638,11 +645,11 @@ contains
     integer :: idx
 
     select type (sgf => negf%surface_green_cache)
-    type is (TSurfaceGreenCacheDisk)
+    type is (TMatrixCacheDisk)
       idx = 0
-    type is (TSurfaceGreenCacheMem)
+    type is (TMatrixCacheMem)
       idx = 1
-    type is (TSurfaceGreenCacheDummy)
+    type is (TMatrixCacheDummy)
       idx = 2
     class default
       idx = 2
@@ -698,7 +705,7 @@ contains
     negf%eneconv = params%eneconv
     negf%spin = params%spin
     negf%wght = params%wght
-    negf%kpoint = params%kpoint
+    negf%ikpoint = params%ikpoint
     negf%DorE = params%DorE
     negf%min_or_max = params%min_or_max
     negf%isSid = params%isSid
@@ -715,17 +722,17 @@ contains
     if (params%SGFcache .eq. 0) then
       if (tmp .ne. 0 .or. .not. allocated(negf%surface_green_cache)) then
         if (allocated(negf%surface_green_cache)) call negf%surface_green_cache%destroy()
-        negf%surface_green_cache = TSurfaceGreenCacheDisk(scratch_path=negf%scratch_path)
+        negf%surface_green_cache = TMatrixCacheDisk(scratch_path=negf%scratch_path)
       end if
     else if (params%SGFcache .eq. 1) then
       if (tmp .ne. 1 .or. .not. allocated(negf%surface_green_cache)) then
         if (allocated(negf%surface_green_cache)) call negf%surface_green_cache%destroy()
-        negf%surface_green_cache = TSurfaceGreenCacheMem()
+        negf%surface_green_cache = TMatrixCacheMem()
       end if
     else
       if (tmp .ne. 2 .or. .not. allocated(negf%surface_green_cache)) then
         if (allocated(negf%surface_green_cache)) call negf%surface_green_cache%destroy()
-        negf%surface_green_cache = TSurfaceGreenCacheDummy()
+        negf%surface_green_cache = TMatrixCacheDummy()
       end if
     end if
 
@@ -744,7 +751,7 @@ contains
     negf%scratch_path = trim(scratchpath)//'/GS/'
     ! Update the cache object if needed.
     select type (sgf => negf%surface_green_cache)
-      type is (TSurfaceGreenCacheDisk)
+      type is (TMatrixCacheDisk)
         sgf%scratch_path = negf%scratch_path
     end select
 
@@ -1620,7 +1627,7 @@ contains
     do i1=1,size(negf%currents)
 
        write(101,'(1x,a,i3,i3,a,i3,a,ES14.5,a,ES14.5,a)') 'contacts:',negf%ni(i1),negf%nf(i1), &
-            '; k-point:',negf%kpoint,'; current:', negf%currents(i1),' A'
+            '; k-point:',negf%ikpoint,'; current:', negf%currents(i1),' A'
 
     end do
 
@@ -1663,7 +1670,7 @@ contains
       Nstep = size(negf%tunn_mat,1)
       size_ni = size(negf%tunn_mat,2)
 
-      write(ofKP,'(i6.6)') negf%kpoint
+      write(ofKP,'(i6.6)') negf%ikpoint
       write(idstr,'(i6.6)') id
 
       open(newunit=iu,file=trim(negf%out_path)//'tunneling_'//ofKP//'_'//idstr//'.dat')
@@ -1687,7 +1694,7 @@ contains
 
         Nstep = size(negf%ldos_mat,1)
 
-        write(ofKP,'(i6.6)') negf%kpoint
+        write(ofKP,'(i6.6)') negf%ikpoint
         write(idstr,'(i6.6)') id
 
         open(newunit=iu,file=trim(negf%out_path)//'localDOS_'//ofKP//'_'//idstr//'.dat')

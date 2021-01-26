@@ -30,6 +30,7 @@ set(sources-fpp
   elphdd.F90
   elphdb.F90
   elphds.F90
+  elphinel.F90
   scba.F90)
 
 if(WITH_INELASTIC)

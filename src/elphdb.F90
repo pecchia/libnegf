@@ -61,6 +61,8 @@ module elphdb
     procedure :: get_sigma_n
     procedure :: set_Gr
     procedure :: set_Gn
+    procedure :: compute_Sigma_r
+    procedure :: compute_Sigma_n
 
   end type ElPhonDephB
 
@@ -152,9 +154,12 @@ contains
 
   !> This interface should append
   !  the retarded self energy to ESH
-  subroutine add_sigma_r(this, esh)
+  subroutine add_sigma_r(this, esh, en_index, k_index, spin)
     class(ElPhonDephB) :: this
     type(z_dns), dimension(:,:), intent(inout) :: esh
+    integer, intent(in), optional :: en_index
+    integer, intent(in), optional :: k_index
+    integer, intent(in), optional :: spin
 
     integer :: n, ii, indend, indstart, natm, norbs
 
@@ -177,10 +182,12 @@ contains
 
   !> Returns the lesser (n) Self Energy in block format
   !
-  subroutine get_sigma_n(this, blk_sigma_n, en_index)
+  subroutine get_sigma_n(this, blk_sigma_n, en_index, k_index, spin)
     class(ElPhonDephB) :: this
     type(z_dns), dimension(:,:), intent(inout) :: blk_sigma_n
-    integer, intent(in) :: en_index
+    integer, intent(in), optional :: en_index
+    integer, intent(in), optional :: k_index
+    integer, intent(in), optional :: spin
 
     integer :: n, nbl, ii, nrow, indend, indstart, natm, norbs
 
@@ -208,10 +215,12 @@ contains
   end subroutine get_sigma_n
 
   !> Give the Gr at given energy point to the interaction
-  subroutine set_Gr(this, Gr, en_index)
+  subroutine set_Gr(this, Gr, en_index, k_index, spin)
     class(ElPhonDephB) :: this
     type(z_dns), dimension(:,:), intent(in) :: Gr
-    integer, intent(in) :: en_index
+    integer, intent(in), optional :: en_index
+    integer, intent(in), optional :: k_index
+    integer, intent(in), optional :: spin
 
     integer :: n, npl, ii, indstart, indend, natm, norbs
 
@@ -236,10 +245,12 @@ contains
   end subroutine set_Gr
 
   !> Give the Gn at given energy point to the interaction
-  subroutine set_Gn(this, Gn, en_index)
+  subroutine set_Gn(this, Gn, en_index, k_index, spin)
     class(ElPhonDephB) :: this
     type(z_dns), dimension(:,:), intent(in) :: Gn
-    integer, intent(in) :: en_index
+    integer, intent(in), optional :: en_index
+    integer, intent(in), optional :: k_index
+    integer, intent(in), optional :: spin
 
     integer :: n, npl, ii, indstart, indend, natm, norbs
 
@@ -263,5 +274,20 @@ contains
 
   end subroutine set_Gn
 
+  !>  Compute Sigma_r : necessary for inelastic
+  subroutine compute_Sigma_r(this, en_index, k_index, spin)
+    class(ElPhonDephB) :: this
+    integer, intent(in), optional  :: en_index
+    integer, intent(in), optional  :: k_index
+    integer, intent(in), optional  :: spin
+  end subroutine compute_Sigma_r
+
+  !>  Compute Sigma_n : necessary for inelastic
+  subroutine compute_Sigma_n(this, en_index, k_index, spin)
+    class(ElPhonDephB) :: this
+    integer, intent(in), optional  :: en_index
+    integer, intent(in), optional  :: k_index
+    integer, intent(in), optional  :: spin
+  end subroutine compute_Sigma_n
 
 end module elphdb

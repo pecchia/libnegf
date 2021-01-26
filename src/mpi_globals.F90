@@ -28,7 +28,6 @@ module mpi_globals
 
 #:endif
 
-  INTEGER, SAVE ::  mpi_comm
   INTEGER, SAVE ::  numprocs = 1
   INTEGER, SAVE ::  id = 0
   LOGICAL, SAVE ::  id0 = .true.
@@ -63,7 +62,7 @@ module mpi_globals
       integer :: outComm
       integer :: ndims = 2
       integer :: dims(2)
-      integer :: period(2) = 0
+      integer :: period(2) = (/1, 0/)
       integer :: remain_dims(2)
       integer :: nE
       integer :: reorder = 1

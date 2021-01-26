@@ -39,7 +39,7 @@ module interactions
   type, abstract :: interaction
     !> Textual descriptor for output
     character(len=LST) :: descriptor
-    !> Maximum number of SCBA iterations. 
+    !> Maximum number of SCBA iterations
     !! corresponds to no iterations (self energy is not calculated)
     integer :: scba_niter = 0
     !> SCBA iteration (set from outside)
@@ -52,14 +52,16 @@ module interactions
 
   contains
 
-    procedure, non_overridable :: set_scba_iter    
+    procedure, non_overridable :: set_scba_iter
     procedure(abst_add_sigma_r), deferred :: add_sigma_r
     procedure(abst_get_sigma_n), deferred :: get_sigma_n
     procedure(abst_set_Gr), deferred :: set_Gr
     procedure(abst_set_Gn), deferred :: set_Gn
+    procedure(abst_comp_Sigma_r), deferred :: compute_Sigma_r
+    procedure(abst_comp_Sigma_n), deferred :: compute_Sigma_n
 
   end type Interaction
-  
+
   !-----------------------------------------------------------------------------
   ! derived type to create array of pointers to objects
   type TInteractionArray
@@ -70,11 +72,14 @@ module interactions
 
     !> This interface should append
     !! the retarded self energy to ESH
-    subroutine abst_add_sigma_r(this, esh)
+    subroutine abst_add_sigma_r(this, esh, en_index, k_index, spin)
       import :: interaction
       import :: z_dns
       class(interaction) :: this
       type(z_dns), dimension(:,:), intent(inout) :: esh
+      integer, intent(in), optional  :: en_index
+      integer, intent(in), optional  :: k_index
+      integer, intent(in), optional  :: spin
     end subroutine abst_add_sigma_r
 
     !> Returns the lesser (n) Self Energy in block format
@@ -82,34 +87,61 @@ module interactions
     !! @param [in] struct: system structure
     !! @param [inout] blk_sigma_n: block dense sigma_n
     !! @param [in] ie: index of energy point
-    subroutine abst_get_sigma_n(this, blk_sigma_n, en_index)
+    !! @param [in] ie: index of k point
+    subroutine abst_get_sigma_n(this, blk_sigma_n, en_index, k_index, spin)
       import :: interaction
       import :: z_dns
       class(interaction) :: this
       type(z_dns), dimension(:,:), intent(inout) :: blk_sigma_n
-      integer, intent(in) :: en_index
+      integer, intent(in), optional :: en_index
+      integer, intent(in), optional :: k_index
+      integer, intent(in), optional :: spin
     end subroutine abst_get_sigma_n
 
     !> Give the Gr at given energy point to the interaction
-    subroutine abst_set_Gr(this, Gr, en_index)
+    subroutine abst_set_Gr(this, Gr, en_index, k_index, spin)
       import :: interaction
       import :: z_dns
       class(interaction) :: this
       type(z_dns), dimension(:,:), intent(in) :: Gr
-      integer, intent(in) :: en_index
+      integer, intent(in), optional  :: en_index
+      integer, intent(in), optional  :: k_index
+      integer, intent(in), optional  :: spin
     end subroutine abst_set_Gr
 
     !> Give the Gn at given energy point to the interaction
-    subroutine abst_set_Gn(this, Gn, en_index)
+    subroutine abst_set_Gn(this, Gn, en_index, k_index, spin)
       import :: interaction
       import :: z_dns
       class(interaction) :: this
       type(z_dns), dimension(:,:), intent(in) :: Gn
-      integer, intent(in) :: en_index
+      integer, intent(in), optional  :: en_index
+      integer, intent(in), optional  :: k_index
+      integer, intent(in), optional  :: spin
     end subroutine abst_set_Gn
 
+    !>  Compute Sigma_n : necessary for inelastic
+    subroutine abst_comp_Sigma_n(this, en_index, k_index, spin)
+      import :: interaction
+      import :: z_dns
+      class(interaction) :: this
+      integer, intent(in), optional  :: en_index
+      integer, intent(in), optional  :: k_index
+      integer, intent(in), optional  :: spin
+    end subroutine abst_comp_Sigma_n
+
+    !>  Compute Sigma_r : necessary for inelastic
+    subroutine abst_comp_Sigma_r(this, en_index, k_index, spin)
+      import :: interaction
+      import :: z_dns
+      class(interaction) :: this
+      integer, intent(in), optional  :: en_index
+      integer, intent(in), optional  :: k_index
+      integer, intent(in), optional  :: spin
+    end subroutine abst_comp_Sigma_r
+
   end interface
-  
+
   contains
 
   subroutine set_scba_iter(this, scba_iter)
@@ -121,12 +153,12 @@ module interactions
   function get_max_wq(interArr) result(maxwq)
     type(TInteractionArray), intent(in) :: interArr(:)
     real(dp) :: maxwq
-    integer :: ii 
+    integer :: ii
 
     maxwq = 0.0_dp
     do ii = 1, size(interArr)
       if (interArr(ii)%inter%wq > maxwq) then
-         maxwq = interArr(ii)%inter%wq   
+         maxwq = interArr(ii)%inter%wq
       end if
     end do
   end function get_max_wq
@@ -137,7 +169,7 @@ module interactions
     max_niter = 0
     do ii = 1, size(interArr)
       if (interArr(ii)%inter%scba_niter > max_niter) then
-         max_niter = interArr(ii)%inter%scba_niter   
+         max_niter = interArr(ii)%inter%scba_niter
       end if
     end do
   end function get_max_niter

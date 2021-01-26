@@ -82,6 +82,8 @@ module integrations
 
  integer, PARAMETER :: VBT=70
 
+
+
 contains
 
   subroutine destroy_en_grid(en_grid)
@@ -1293,11 +1295,10 @@ contains
        Ec = negf%en_grid(i)%Ec
        negf%iE = negf%en_grid(i)%pt
 
-       if(negf%tCalcSelfEnergies) then
-          if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
-          call compute_contacts(Ec+j*negf%delta,negf,ncyc,Tlc,Tcl,SelfEneR,GS)
-          if (id0.and.negf%verbose.gt.VBT) call write_clock
-       end if
+       if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
+       call compute_contacts(Ec+j*negf%delta,negf,ncyc,Tlc,Tcl,SelfEneR,GS)
+       if (id0.and.negf%verbose.gt.VBT) call write_clock
+       call write_real_info(negf%verbose, 'Average number of iterations', ncyc)
 
        if (.not.do_LEDOS) then
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Tunneling ')
@@ -1341,7 +1342,7 @@ contains
   !    I_i(E) = Tr[Sigma^n_i(E)*A(E)-Gamma_i(E)*G^n(E)]
   !
   !  The solution is calculated on an arbitrary number of
-  !  leads and stored on negf%tunn_mat. The leads are specified in negf%ni
+  !  leads and stored on negf%curr_mat. The leads are specified in negf%ni
   !  We don't use the collector negf%nf because we need to specify only the
   !  lead for integration
   !
@@ -1371,7 +1372,7 @@ contains
 
     ncont = negf%str%num_conts
     Nstep = size(negf%en_grid)
-    call log_allocate(curr_mat,size_ni)
+    call log_allocate(curr_mat, size_ni)
     if (.not. allocated(negf%curr_mat)) then
       call log_allocate(negf%curr_mat,Nstep,size_ni)
     end if
@@ -1399,11 +1400,10 @@ contains
         enddo
       endif
 
-      if(negf%tCalcSelfEnergies) then
-         if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
-         call compute_contacts(Ec+j*negf%delta, negf, ncyc, Tlc, Tcl, SelfEneR, GS)
-         if (id0.and.negf%verbose.gt.VBT) call write_clock
-      end if
+      if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
+      call compute_contacts(Ec+j*negf%delta, negf, ncyc, Tlc, Tcl, SelfEneR, GS)
+      if (id0.and.negf%verbose.gt.VBT) call write_clock
+      call write_real_info(negf%verbose, 'Average number of iterations', ncyc)
 
       ! Calculate the SCBA before meir-wingreen current so el-ph self-energies are stored
       if (allocated(negf%interArr)) then
@@ -1443,7 +1443,133 @@ contains
 
   end subroutine meir_wingreen
 
+  !---------------------------------------------------------------------------
+  !>
+  !  Calculate the layer current per unit energy
+  !
+  !    I_LL'(E) = Tr[(ES-H)_LL' * Gn_L'L(E)-(ES-H)_L'L * Gn_LL'(E)]
+  !
+  !  The solution is calculated on adjecent layers and stored
+  !  negf%tunn_mat. The leads are specified in negf%ni
+  !  We don't use the collector negf%nf because we need to specify only the
+  !  lead for integration
+  !
+  !---------------------------------------------------------------------------
+  subroutine layer_current(negf)
+    type(Tnegf) :: negf
 
+    integer :: nbl, scba_iter, scba_niter, Nstep
+    integer :: ii, i1, j1, iK, icont, outer, ncont, ref_bk
+    real(dp) :: ncyc, scba_error
+    Type(z_DNS), Dimension(MAXNCONT) :: SelfEneR, Tlc, Tcl, GS
+    real(dp), dimension(:), allocatable :: curr_mat, frm
+    complex(dp) :: Ec
+    Type(z_CSR) :: Gn
+
+    outer = 0
+    ncont = negf%str%num_conts
+    Nstep = size(negf%en_grid)
+    nbl = negf%str%num_PLs
+    negf%readOldSGF = negf%readOldT_SGFs
+
+    ! Allocating curr_mat to nbl-1 so we compute L->L+1 currents
+    if (.not. allocated(negf%curr_mat)) then
+      call log_allocate(negf%curr_mat, Nstep, nbl-1)
+    end if
+    negf%curr_mat = 0.0_dp
+    call log_allocate(curr_mat, nbl-1)
+
+    ! Create Fermi array. Set reference such that f(ref)=0.
+    ref_bk = negf%refcont
+    negf%refcont = ncont + 1
+    call log_allocate(frm, ncont+1)
+    frm = 0.0_dp
+    do j1 = 1,ncont
+      frm(j1)=fermi(real(Ec), negf%cont(j1)%mu, negf%cont(j1)%kbT_t)
+    enddo
+    ! ---------------------------------------------------------------------
+    ! 0th order GF on the extended energy range
+    ! ---------------------------------------------------------------------
+    !call write_info(negf%verbose, 'CALCULATION OF 0th ORDER GF', 0)
+    !do j1 = 1, size(negf%kproc)
+    !  negf%iKpoint = negf%kproc(j1)
+    !  do ii = 1, Nstep
+    !    call write_point(negf%verbose, negf%en_grid(ii), size(negf%en_grid))
+    !    if (negf%en_grid(ii)%cpu /= id) cycle
+    !    Ec = negf%en_grid(ii)%Ec
+    !    negf%iE = negf%en_grid(ii)%pt
+    !    if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
+    !    call compute_contacts(Ec+j*negf%delta, negf, ncyc, Tlc, Tcl, SelfEneR, GS)
+    !    if (id0.and.negf%verbose.gt.VBT) call write_clock
+    !    call write_real_info(negf%verbose, 'Average number of iterations', ncyc)
+    !    call calculate_Gn_neq_components(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,Gn,outer)
+    !  end do
+    !end do
+
+    !
+
+
+    ! ---------------------------------------------------------------------
+    ! SCBA Iteration
+    ! ---------------------------------------------------------------------
+    call negf%scbaDriver%init(1.0e-7_dp, .false.)
+    scba_niter = get_max_niter(negf%interArr)
+
+    do scba_iter = 0, scba_niter
+      call write_info(negf%verbose, 'SCBA ITERATION', scba_iter)
+
+      ! Loop over k-points
+      do j1 = 1, size(negf%kproc)
+        negf%iKpoint = negf%kproc(j1)
+
+        !! Loop over energy points
+        do ii = 1, Nstep
+
+          call write_point(negf%verbose, negf%en_grid(ii), size(negf%en_grid))
+          if (negf%en_grid(ii)%cpu /= id) cycle
+          Ec = negf%en_grid(ii)%Ec
+          negf%iE = negf%en_grid(ii)%pt
+
+          if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
+          call compute_contacts(Ec+j*negf%delta, negf, ncyc, Tlc, Tcl, SelfEneR, GS)
+          if (id0.and.negf%verbose.gt.VBT) call write_clock
+
+          if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Gn ')
+          negf%tDestroyBlk = .false.
+          call calculate_Gn_neq_components(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,Gn,outer)
+          if (id0.and.negf%verbose.gt.VBT) call write_clock
+
+          ! Compute currents based on computed components
+          call iterative_layer_current(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,curr_mat)
+
+          negf%curr_mat(ii,:) = curr_mat(:) * negf%wght
+
+        end do
+
+      end do
+
+      ! SEBASTIAN CODE HERE
+      ! loop over the tri/diagonal Gr, Gn
+      call self_energy( Gr, Sigma_r, Nq+1,Nq)
+      call self_energy( Gr, Sigma_r, imag*0.5_dp,-imag*0.5_dp)
+      call self_energy( Gn, Sigma_n, Nq,Nq+1)
+
+
+
+        call negf%scbaDriver%check_Mat_convergence(Gn)
+        call negf%scbaDriver%destroy()
+
+        do icont=1,ncont
+          call destroy(Tlc(icont),Tcl(icont),SelfEneR(icont),GS(icont))
+        end do
+
+      end do
+
+    end do
+    call log_deallocate(curr_mat)
+    negf%refcont = ref_bk
+
+  end subroutine layer_current
   !---------------------------------------------------------------------------
   !>
   !  Calculate the equilibrium Retarded Green's function (extended diagonal)
@@ -1563,10 +1689,6 @@ contains
     end if
 
     size_ni = size(negf%tunn_mat,2)
-
-    !print *, 'negf%ni',negf%ni
-    !print *, 'negf%nf',negf%nf
-    !print *, 'negf%ref',negf%refcont
 
     ! If previous calculation is there, destroy it
     if (allocated(negf%currents)) call log_deallocate(negf%currents)
@@ -1694,6 +1816,7 @@ contains
        if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
        call compute_contacts(Ec+j*delta,negf,ncyc,Tlc,Tcl,SelfEneR,GS)
        if (id0.and.negf%verbose.gt.VBT) call write_clock
+       if (id0.and.negf%verbose.gt.VBT) write(*,*) 'Average number of iterations', ncyc
 
 
        if (.not.do_LEDOS) then

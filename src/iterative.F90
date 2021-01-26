@@ -57,9 +57,12 @@ module iterative
 
   logical, parameter :: debug=.false.
 
+  ! These are here temporarily ...
   type(z_DNS), dimension(:), allocatable :: gsmr
   type(z_DNS), dimension(:), allocatable :: gsml
   type(z_DNS), dimension(:,:), allocatable :: Gr
+  type(z_DNS), dimension(:,:), allocatable :: ESH
+  type(z_DNS), dimension(:,:), allocatable :: Gn
 
 
 CONTAINS
@@ -101,7 +104,6 @@ CONTAINS
     integer, intent(in) :: outer
 
     !Work
-    type(z_DNS), dimension(:,:), allocatable :: ESH
     type(z_CSR) :: ESH_tot, Ain
     integer :: i,ierr, nbl, ncont,ii,n
 
@@ -140,16 +142,6 @@ CONTAINS
     call destroy_gsm(gsmr)
     call deallocate_gsm(gsmr)
 
-
-    ! SAVE ON FILES/MEMORY (for elph).........................
-    !if (negf%elph%numselmodes.gt.0 .and. negf%elph%model .eq. -1) then
-    !  ! save diagonal blocks of Gn = -i G<
-    !  do i = 1, nbl
-    !    call write_blkmat(Gr(i,i),negf%scratch_path,'G_r_',i,i,negf%iE)
-    !  end do
-    !endif
-    !..........................................................
-    !! Deliver Gr to interaction models if any
     call set_Gr(negf%interArr, Gr, negf%iE)
 
     call blk2csr(Gr,negf%str,negf%S,Grout)
@@ -162,7 +154,6 @@ CONTAINS
       call calculate_Gr_outer(Tlc,Tcl,gsurfR,negf%str,.TRUE.,Grout)
     end SELECT
 
-    !Distruzione dell'array Gr
     call destroy_blk(Gr)
     DEALLOCATE(Gr)
 
@@ -170,11 +161,13 @@ CONTAINS
 
   !****************************************************************************
   !
-  ! Driver for computing G_n contributions due to all contacts but reference:
+  ! Driver for computing G_n contributions due to all contacts MINUS reference:
+  ! Reference is necessary when splitting into contour + real-axis integration
   !
   !   Sum   [f_j(E)-f_r(E)] Gr Gam_j Ga
   !   j!=r
   !
+  ! NOTE: Setting reference to ncont+1 removes the reference part
   !****************************************************************************
 
   subroutine calculate_Gn_neq_components(negf,E,SelfEneR,Tlc,Tcl,gsurfR,frm,Glout,outblocks)
@@ -213,8 +206,6 @@ CONTAINS
     integer :: ref
     complex(dp) :: Ec
     integer :: i,ierr,ncont,nbl, lbl, rbl
-    type(z_DNS), dimension(:,:), allocatable :: ESH
-    type(z_DNS), dimension(:,:), allocatable :: Gn
     integer, dimension(:), allocatable :: Gr_columns
     type(z_CSR) :: ESH_tot, Gl
     logical :: mask(MAXNCONT)
@@ -236,11 +227,12 @@ CONTAINS
 
     call destroy(ESH_tot)
 
+    ! Add contact self-energy to proper blocks
     do i=1,ncont
       ESH(cblk(i),cblk(i))%val = ESH(cblk(i),cblk(i))%val-SelfEneR(i)%val
     end do
 
-    !! Add interaction self energy if any and initialize scba counter
+    ! Add interaction self energy if any and initialize scba counter
     call add_sigma_r(negf%interArr, ESH)
 
     call allocate_gsm(gsmr,nbl)
@@ -285,8 +277,8 @@ CONTAINS
       endif
     end do
 
-    !If not interactions are present we can already destroy gsmr, gsml.
-    !Otherwise they are still needed to calculate columns ont-the-fly.
+    !If interactions are not present we can already destroy gsmr, gsml.
+    !Otherwise they are still needed to calculate columns on-the-fly.
     if (.not.allocated(negf%interArr)) then
       call destroy_gsm(gsmr)
       call deallocate_gsm(gsmr)
@@ -294,15 +286,14 @@ CONTAINS
       call deallocate_gsm(gsml)
     end if
 
-    !Computing device G_n
+    ! Computing device G_n
     call allocate_blk_dns(Gn,nbl)
-
     call init_blkmat(Gn,ESH)
-
+    ! First the coherent Gn is computed from contact self-energies
     call calculate_Gn_tridiag_blocks(ESH,SelfEneR,frm,ref,negf%str,Gn)
 
-    !Adding el-ph part: G^n = G^n + G^r Sigma^n G^a (at first call does nothing)
-    !NOTE:  calculate_Gn has factor [f_i - f_ref], hence all terms will contain this factor
+    ! Adding el-ph part: G^n = G^n + G^r Sigma^n G^a (at first call does nothing)
+    ! NOTE:  calculate_Gn has factor [f_i - f_ref], hence all terms will contain this factor
     if (allocated(negf%interArr)) then
       call calculate_Gn_tridiag_elph_contributions(negf,ESH,Gn,Gr_columns)
       call destroy_gsm(gsmr)
@@ -310,6 +301,7 @@ CONTAINS
       call destroy_gsm(gsml)
       call deallocate_gsm(gsml)
     end if
+
 
     !Passing G^n to interaction that builds Sigma^n
     call set_Gn(negf%interArr, Gn, negf%iE)
@@ -327,14 +319,9 @@ CONTAINS
       call calculate_Gn_outer(Tlc,gsurfR,SelfEneR,negf%str,frm,ref,.true.,Glout)
     end SELECT
 
-    call destroy_blk(Gn)
-    DEALLOCATE(Gn)
-
-    call destroy_blk(Gr)
-    DEALLOCATE(Gr)
-
-    call destroy_ESH(ESH)
-    DEALLOCATE(ESH)
+    if (negf%tDestroyBlk) then
+      call destroy_all_blk()
+    end if
 
   end subroutine calculate_Gn_neq_components
 
@@ -369,7 +356,6 @@ CONTAINS
     integer :: i,ierr,ncont,nbl,lbl,ii,n
     integer :: pl_start, pl_end
     integer :: ref, lead, lead_blk, ref_blk
-    type(z_DNS), dimension(:,:), allocatable :: ESH, Gn
     integer, dimension(:), allocatable :: Gr_columns
     type(z_DNS) :: work1, work2, Gam, A
     type(z_CSR) :: ESH_tot, Gl
@@ -436,8 +422,7 @@ CONTAINS
       call calculate_Gn_tridiag_elph_contributions(negf, ESH, Gn, Gr_columns)
     end if
 
-    ! The gsmr, gsml are used to calculate columns on-the-fly in calculate_Gn_tridiag_elph_contributions, we
-    ! can destroy them here.
+    ! The gsmr, gsml are used to calculate columns on-the-fly and now can be removed
     call destroy_gsm(gsmr)
     call deallocate_gsm(gsmr)
     call destroy_gsm(gsml)
@@ -465,18 +450,22 @@ CONTAINS
     end do
     !Convert to output CSR format.
     call blk2csr(Gn,negf%str,negf%S,Gl)
-    DEALLOCATE(Gn)
 
-    call destroy_blk(Gr)
-    DEALLOCATE(Gr)
-
-    call destroy_ESH(ESH)
-    DEALLOCATE(ESH)
+    call destroy_all_blk()
 
     end associate
 
   end subroutine iterative_meir_wingreen
 
+
+  subroutine destroy_all_blk()
+    call destroy_blk(Gr)
+    DEALLOCATE(Gr)
+    call destroy_blk(Gn)
+    DEALLOCATE(Gn)
+    call destroy_ESH(ESH)
+    DEALLOCATE(ESH)
+  end subroutine
 
   ! Add all Self-enrgies to the Hamiltonian
   subroutine add_sigma_r(interArr, ESH)

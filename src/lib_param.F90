@@ -128,7 +128,7 @@ module lib_param
     real(dp) :: eneconv           ! Energy conversion factor
     integer  :: spin = 1          ! spin component
     real(dp) :: wght              ! k-point weight
-    integer :: kpoint             ! k-point index
+    integer :: iKpoint            ! k-point index
     character(1) :: DorE          ! Density or En.Density
 
     !! Contacts info
@@ -203,6 +203,8 @@ module lib_param
     ! Array to store kpoints and kweights
     real(dp), allocatable, dimension(:,:) :: kpoints
     real(dp), allocatable, dimension(:) :: kweights
+    ! Array for k-point distribution
+    integer, allocatable, dimension(:) :: kproc
 
     ! Many Body Interactions as array of pointers
     type(TInteractionArray), dimension(:), allocatable :: interArr
@@ -216,12 +218,12 @@ module lib_param
     real(dp), dimension(:), allocatable :: currents
 
     ! These variables need to be done to clean up
-    logical :: tCalcSelfEnergies = .true.
     logical :: tDephasingVE = .false.
     logical :: tDephasingBP = .false.
     logical :: tOrthonormal = .false.
     logical :: tOrthonormalDevice = .false.
     integer :: numStates = 0
+    logical :: tDestroyBlk = .true.
     ! Buttiker Probes dephasing
     type(Tdeph_bp) :: bp_deph
 
@@ -229,7 +231,10 @@ module lib_param
     integer :: readOldSGF
 
     ! Work variable: surface green cache.
-    class(TSurfaceGreenCache), allocatable :: surface_green_cache
+    class(TMatrixCache), allocatable :: surface_green_cache
+    class(TMatrixCache), allocatable :: G_r
+    class(TMatrixCache), allocatable :: G_n
+    class(TMatrixCache), allocatable :: ESH
 
     contains
 
@@ -361,7 +366,7 @@ contains
      this%ReadOldT_SGFs = 1    ! Compute Surface G.F. do not save
 
      this%wght = 1.d0
-     this%kpoint = 1
+     this%ikpoint = 1
 
      this%Ec = 0.d0
      this%Ev = 0.d0
@@ -402,7 +407,7 @@ contains
                              ! Only in adaptive refinement
      this%ndos_proj = 0
 
-     this%surface_green_cache = TSurfaceGreenCacheDisk(scratch_path=this%scratch_path)
+     this%surface_green_cache = TMatrixCacheDisk(scratch_path=this%scratch_path)
 
    end subroutine set_defaults
 
@@ -480,7 +485,7 @@ contains
      write(io,*) 'Internal variables:'
      write(io,*) 'intHS= ',this%intHS
      write(io,*) 'intDM= ',this%intDM
-     write(io,*) 'kp= ', this%kpoint
+     write(io,*) 'kp= ', this%ikpoint
      write(io,*) 'wght= ', this%wght
      write(io,*) 'E= ',this%E
      write(io,*) 'outer= ', this%outer
