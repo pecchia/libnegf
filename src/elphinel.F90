@@ -67,10 +67,12 @@ module elphinel
   !> Interface of C function that perform all the MPI communications in order to compute
   !  sigma_r and sigma_n
   interface
-   integer (c_int) function self_energy(Np, NK, NE, NKloc, NEloc, iEshift, GG, sigma, &
-            & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, cart_comm, fac_min, fac_plus, func) &
+   integer (c_int) function self_energy(cart_comm, Np, NK, NE, NKloc, NEloc, iEshift, GG, sigma, &
+            & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, fac_min, fac_plus, func) &
             & bind(C, name='self_energy')
      import :: dp
+     !> Cartesian MPI_communicator (negf%cartgrid%id)
+     integer(c_int) :: cart_comm
      !> matrix size Np x Np
      integer(c_int), value :: Np
      !> Total Number of K-points
@@ -94,8 +96,6 @@ module elphinel
      complex(c_double_complex) :: rbuff2
      complex(c_double_complex) :: sbuffH
      complex(c_double_complex) :: rbuffH
-     !> Cartesian MPI_communicator (negf%cartgrid%id)
-     integer(c_int) :: cart_comm
      !> prefactor of GG(E-wq) (e.g. nq+1, nq, i/2)
      complex(c_double_complex) :: fac_min
      !> prefactor of GG(E+wq)

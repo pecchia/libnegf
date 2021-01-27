@@ -22,6 +22,8 @@
 // =========================================================
 
 int self_energy_polar_optical_phonon_scattering(
+  MPI_Comm comm2d, 
+  MPI_Comm comm2d_per,
   int Np,
   int NK,
   int NE,
@@ -36,8 +38,6 @@ int self_energy_polar_optical_phonon_scattering(
   double complex *rbuff2,
   double complex *sbuffH, 
   double complex *rbuffH,
-  MPI_Comm comm2d, 
-  MPI_Comm comm2d_per,
   double fac1,
   double fac2
 )
@@ -53,7 +53,13 @@ int self_energy_polar_optical_phonon_scattering(
   int psource, pdest;
   int hsource, hdest;
   int ndiff;
-  
+
+  // dimensions of the cartesian grid
+  int ndims = 2; 
+  // dims not defined
+  dim[2] = ?
+
+
   MPI_Request rqE[4];
   MPI_Status statusE[4];
   
@@ -72,12 +78,16 @@ int self_energy_polar_optical_phonon_scattering(
     {
       iEglo=iE+coords[1]*NEloc;
       
-      
+      ////////////////////////////////////////////////////////////////////////////////////
+      // Communications of G(k, E-hwq) 
+      ////////////////////////////////////////////////////////////////////////////////////
+
+      // checks if iE-iEhbaromegaLO is on the same processor => no communication
       if( (((int)iE - iEhbaromegaLO) >=0 && (iE - iEhbaromegaLO) < NEloc) || iEglo < NEloc)
       {
-        // No communication neccassary for iEminus
         iEminus=iE-iEhbaromegaLO;
         if(iEminus<=0) {iEminus = 0;}
+        // pbuff1 points to G(k,E-wq)
         pbuff1 = &Gless[(iK*NEloc+iEminus)*Np*Np];
         mdest=MPI_PROC_NULL;
         msource=MPI_PROC_NULL;
@@ -85,38 +95,39 @@ int self_energy_polar_optical_phonon_scattering(
       
       if(dims[1] > 1)
       {
+        // get global iEminus
         iEminus = iEglo-iEhbaromegaLO;
         if( iEhbaromegaLO >= NEloc )
           ndiff = (iEglo-iEminus)/ NEloc;
         else
           ndiff = (NEloc+iEglo-iEminus)/ NEloc;
+      
+        // get destination process 
         MPI_Cart_shift( comm2d, 1, ndiff, &msource, &mdest );
-        // send to dest
+        
         if(mdest != MPI_PROC_NULL && iE<iEhbaromegaLO) 
         {
+          // get local iEmins in destination process and send there
           iEminus = (NEloc+iE-iEhbaromegaLO) % NEloc;
           MPI_Isend(&Gless[(iK*NEloc+iEminus)*Np*Np],Np*Np,MPI_DOUBLE_COMPLEX,mdest,41,comm2d,&rqE[0]);
         }
-        // recv from source
+
+        // corresponding recv        
         if(msource != MPI_PROC_NULL && iE<iEhbaromegaLO) 
         {
           MPI_Irecv(rbuff1,Np*Np,MPI_DOUBLE_COMPLEX,msource,41,comm2d,&rqE[1]);
-          // pointer
+          // pbuff1 points to received buffer with G(k,E-wq)
           pbuff1 = rbuff1;
         }
       }
       
+      ////////////////////////////////////////////////////////////////////////////////////
+      // Communications of G(k, E+hwq) 
+      ////////////////////////////////////////////////////////////////////////////////////
       
-      
-      
-      
-      
-      
-      
-      
+      // checks if iE+iEhbaromegaLO is on the same processor => no communication
       if( (((int)iE + iEhbaromegaLO) >=0 && (iE + iEhbaromegaLO) < NEloc) || iEglo >= NE-NEloc)
       {
-        // No communication neccassary for iEplus
         iEplus = iE+iEhbaromegaLO;
         if(iEglo+iEhbaromegaLO>=NE) {iEplus = NEloc-1;}
         pbuff2 = &Gless[(iK*NEloc+iEplus)*Np*Np];
@@ -128,15 +139,12 @@ int self_energy_polar_optical_phonon_scattering(
       {
         iEplus = iEglo + iEhbaromegaLO;
         if( iEhbaromegaLO >= NEloc )
-        {
           ndiff = (iEplus-iEglo) / NEloc;
-        }
         else
-        {
           ndiff = (iEplus+NEloc-iEglo)/ NEloc;
-        }
+
         MPI_Cart_shift( comm2d, 1, -ndiff, &psource, &pdest );
-        // send to dest
+        // get local iEmins in destination process and send there
         if(pdest != MPI_PROC_NULL && iE >= NEloc-iEhbaromegaLO)
         {
           iEplus = iE - (NEloc - iEhbaromegaLO);
@@ -146,12 +154,11 @@ int self_energy_polar_optical_phonon_scattering(
         if(psource != MPI_PROC_NULL && iE >= NEloc-iEhbaromegaLO)
         {
           MPI_Irecv(rbuff2,Np*Np,MPI_DOUBLE_COMPLEX,psource,42,comm2d,&rqE[3]);
-          // pointer
+          // pbuff2 points G(k,E+hwq)
           pbuff2 = rbuff2;
         }
         
       }
-      
       
       if(dims[1] > 1)
       {
@@ -162,7 +169,9 @@ int self_energy_polar_optical_phonon_scattering(
         if(psource != MPI_PROC_NULL && iE >= NEloc-iEhbaromegaLO) MPI_Wait(&rqE[3],&statusE[3]);
       }
       
-      
+      ////////////////////////////////////////////////////////////////////////////////////
+      // Communications of k-points 
+      ////////////////////////////////////////////////////////////////////////////////////
       
       // Update local
       #pragma omp parallel for private(iQ,jz,iz,iQglo,im) collapse(2)
