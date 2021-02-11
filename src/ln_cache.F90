@@ -19,8 +19,8 @@
 !!--------------------------------------------------------------------------!
 
 module ln_cache
-
-  use mat_def, only: z_DNS, assignment(=)
+  use iso_c_binding
+  use mat_def, only: z_DNS, assignment(=), destroy
   use ln_precision
   use globals
   use outmatrix, only: outmat_c, inmat_c
@@ -47,14 +47,16 @@ module ln_cache
 
   type, abstract :: TMatrixCache
   contains
-    procedure(abst_add_matrix_to_cache), deferred :: add
-    procedure(abst_retrieve_matrix_from_cache), deferred :: retrieve
-    procedure(abst_destroy_matrix_cache), deferred :: destroy
+    procedure(abst_add_matrix), deferred :: add
+    procedure(abst_retrieve_matrix), deferred :: retrieve
+    procedure(abst_retrieve_matrix_pointer), deferred :: retrieve_pointer
+    procedure(abst_retrieve_matrix_loc), deferred :: retrieve_loc
+    procedure(abst_destroy_matrix), deferred :: destroy
     procedure(abst_is_cached), deferred :: is_cached
   end type TMatrixCache
 
   abstract interface
-    subroutine abst_add_matrix_to_cache(this, matrix, label)
+    subroutine abst_add_matrix(this, matrix, label)
       import :: TMatrixCache
       import :: z_DNS
       import :: TMatLabel
@@ -63,7 +65,7 @@ module ln_cache
       type(TMatLabel) :: label
     end subroutine
 
-    subroutine abst_retrieve_matrix_from_cache(this, matrix, label)
+    subroutine abst_retrieve_matrix(this, matrix, label)
       import :: TMatrixCache
       import :: z_DNS
       import :: TMatLabel
@@ -71,6 +73,24 @@ module ln_cache
       type(z_DNS) :: matrix
       type(TMatLabel) :: label
     end subroutine
+
+    function abst_retrieve_matrix_pointer(this, label) result(pmatrix)
+      import :: z_DNS
+      import :: TMatrixCache
+      import :: TMatLabel
+      class(TMatrixCache) :: this
+      type(TMatLabel) :: label
+      type(z_DNS), pointer :: pmatrix
+    end function 
+
+    function abst_retrieve_matrix_loc(this, label) result(pmatrix)
+      use iso_c_binding
+      import :: TMatrixCache
+      import :: TMatLabel
+      class(TMatrixCache) :: this
+      type(TMatLabel) :: label
+      type(C_PTR) :: pmatrix
+    end function 
 
     function abst_is_cached(this, label) result(val)
       import :: TMatrixCache
@@ -82,7 +102,7 @@ module ln_cache
       logical :: val
     end function
 
-    subroutine abst_destroy_matrix_cache(this)
+    subroutine abst_destroy_matrix(this)
       import :: TMatrixCache
       class(TMatrixCache) :: this
     end subroutine
@@ -101,6 +121,8 @@ module ln_cache
   contains
     procedure :: add => mem_add
     procedure :: retrieve => mem_retrieve
+    procedure :: retrieve_pointer => mem_retrieve_pointer
+    procedure :: retrieve_loc => mem_retrieve_loc
     procedure :: destroy => mem_destroy
     procedure :: is_cached => mem_is_cached
   end type
@@ -111,6 +133,8 @@ module ln_cache
   contains
     procedure :: add => disk_add
     procedure :: retrieve => disk_retrieve
+    procedure :: retrieve_pointer => disk_retrieve_pointer
+    procedure :: retrieve_loc => disk_retrieve_loc
     procedure :: destroy => disk_destroy
     procedure :: is_cached => disk_is_cached
   end type
@@ -120,6 +144,8 @@ module ln_cache
   contains
     procedure :: add => dummy_add
     procedure :: retrieve => dummy_retrieve
+    procedure :: retrieve_pointer => dummy_retrieve_pointer
+    procedure :: retrieve_loc => dummy_retrieve_loc
     procedure :: destroy => dummy_destroy
     procedure :: is_cached => dummy_is_cached
   end type
@@ -149,7 +175,9 @@ contains
 
     type(TMatrixCacheEntry), pointer :: p
 
+    print*,'In mem add'
     if (.not. associated(this%first)) then
+      print*,'first node allocation'
       allocate (this%first)
       p => this%first
     else
@@ -158,6 +186,9 @@ contains
       p%next => this%first
       this%first => p
     end if
+    print*,'allocate space for matrix'
+    allocate(p%matrix)
+    print*,'copy matrix where needed'
     p%matrix = matrix
     p%mat_label = label
   end subroutine
@@ -186,7 +217,57 @@ contains
     error stop "Cannot retrieve matrix"
 
   end subroutine
+  
+  function mem_retrieve_pointer(this, label) result(pmatrix)
+    class(TMatrixCacheMem) :: this
+    type(TMatLabel) :: label
+    type(z_DNS), pointer :: pmatrix
+    
+    type(TMatrixCacheEntry), pointer :: p
 
+    if (.not. associated(this%first)) then
+      error stop "No entry in matrix cache"
+    else
+      p => this%first
+    end if
+
+    do while (associated(p))
+      if (p%mat_label .eq. label) then
+        pmatrix => p%matrix
+        return 
+      end if
+      p => p%next
+    end do
+
+    error stop "Cannot retrieve matrix in cache"
+
+  end function 
+  
+  function mem_retrieve_loc(this, label) result(pmatrix)
+    class(TMatrixCacheMem) :: this
+    type(TMatLabel) :: label
+    type(C_PTR) :: pmatrix
+    
+    type(TMatrixCacheEntry), pointer :: p
+
+    if (.not. associated(this%first)) then
+      error stop "No entry in matrix cache"
+    else
+      p => this%first
+    end if
+
+    do while (associated(p))
+      if (p%mat_label .eq. label) then
+        pmatrix = c_loc(p%matrix%val)
+        return 
+      end if
+      p => p%next
+    end do
+
+    error stop "Cannot retrieve matrix in cache"
+
+  end function 
+  
   function mem_is_cached(this, label) result(val)
     class(TMatrixCacheMem) :: this
     type(TMatLabel) :: label
@@ -224,9 +305,11 @@ contains
 
     p => this%first
     do while (associated(p))
+      call destroy(p%matrix)
+      deallocate(p%matrix)
       previous => p
       p => p%next
-      deallocate (previous)
+      deallocate(previous)
     end do
 
   end subroutine
@@ -277,6 +360,29 @@ contains
     close (file_unit)
 
   end subroutine
+  
+  ! This routine gives error because a pointer cannot be associated
+  function disk_retrieve_pointer(this, label) result(pmatrix)
+    class(TMatrixCacheDisk) :: this
+    type(TMatLabel) :: label
+    type(z_DNS), pointer :: pmatrix
+
+    pmatrix => null() 
+    error stop "cannot retrieve pointer from disk cache"
+
+  end function disk_retrieve_pointer
+  
+  ! This routine gives error because a pointer cannot be associated
+  function disk_retrieve_loc(this, label) result(pmatrix)
+    class(TMatrixCacheDisk) :: this
+    type(TMatLabel) :: label
+    type(C_PTR) :: pmatrix
+
+    pmatrix = C_NULL_PTR
+    error stop "cannot retrieve pointer from disk cache"
+
+  end function disk_retrieve_loc
+
 
   function disk_is_cached(this, label) result(val)
     class(TMatrixCacheDisk) :: this
@@ -351,6 +457,27 @@ contains
     ! Dummy operation
 
   end subroutine
+  
+  ! This routine gives error because a pointer cannot be associated
+  function dummy_retrieve_pointer(this, label) result(pmatrix)
+    class(TMatrixCacheDummy) :: this
+    type(TMatLabel) :: label
+    type(z_DNS), pointer :: pmatrix
+    ! Dummy operation
+    pmatrix => null() 
+
+  end function dummy_retrieve_pointer
+  
+  ! This routine gives error because a pointer cannot be associated
+  function dummy_retrieve_loc(this, label) result(pmatrix)
+    class(TMatrixCacheDummy) :: this
+    type(TMatLabel) :: label
+    type(C_PTR) :: pmatrix
+    ! Dummy operation
+    pmatrix = C_NULL_PTR
+
+  end function dummy_retrieve_loc
+
 
   function dummy_is_cached(this, label) result(val)
     class(TMatrixCacheDummy) :: this
