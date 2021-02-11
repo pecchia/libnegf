@@ -31,7 +31,7 @@ module elphinel
   use mat_def, only : z_csr, z_dns, create, destroy
   use ln_cache
   use distributions, only : bose
-  use iso_c_binding, only : c_int, c_double
+  use iso_c_binding
 
   implicit none
   private
@@ -40,23 +40,51 @@ module elphinel
 
   type, extends(interaction) :: ElPhonInel
     private
-    !> holds atomic structure
+    !> holds atomic structure: Only the scattering region
     type(TBasisCenters) :: basis
+
+    !> binning resolution for z-coordinates
+    real(dp) :: dz
 
     !> Bose-Einstein phonon occupation
     real(dp) :: Nq
 
+    !> Kpoints
+    real(dp), allocatable :: kpoint(:,:)
+    real(dp), allocatable :: kweight(:)
+    integer, allocatable :: local_kindex(:)
+    real(dp) :: cell_area
+    real(dp) :: Ce
+
+    !> Energy grid. global num of energy points
+    integer :: nE_global 
+    !> Energy grid. Local num of energy points
+    integer :: nE_local 
+
+    !> Paramters for the Kappa function
+    real(dp) :: eps0
+    real(dp) :: eps_inf
+    real(dp) :: q0
+    
+    !> Energy grid spacing
+    real(dp) :: dE
+
+    !> Matrix KK
+    real(dp), allocatable :: Kmat(:,:,:)
+
     !> sigma_r and sigma_n
-    type(TMatrixCache), allocatable :: sigma_r
-    type(TMatrixCache), allocatable :: sigma_n
+    class(TMatrixCache), allocatable :: sigma_r
+    class(TMatrixCache), allocatable :: sigma_n
     !> Gr and Gn are pointer alias stored in negf.
-    type(TMatrixCache), pointer :: G_r => null()
-    type(TMatrixCache), pointer :: G_n => null()
+    class(TMatrixCache), pointer :: G_r => null()
+    class(TMatrixCache), pointer :: G_n => null()
+
 
   contains
 
     procedure :: add_sigma_r
-    procedure :: get_sigma_n
+    procedure :: get_sigma_n_blk
+    procedure :: get_sigma_n_mat
     procedure :: set_Gr
     procedure :: set_Gn
     procedure :: compute_sigma_r
@@ -67,14 +95,17 @@ module elphinel
   !> Interface of C function that perform all the MPI communications in order to compute
   !  sigma_r and sigma_n
   interface
-   integer (c_int) function self_energy(cart_comm, Np, NK, NE, NKloc, NEloc, iEshift, GG, sigma, &
-            & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, fac_min, fac_plus, func) &
+   integer (c_int) function self_energy(cart_comm, Nrow, Ncol, NK, NE, NKloc, NEloc, iEshift, GG, sigma, &
+            & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, fac_min, fac_plus, KK, func) &
             & bind(C, name='self_energy')
+     use iso_c_binding
      import :: dp
      !> Cartesian MPI_communicator (negf%cartgrid%id)
      integer(c_int) :: cart_comm
-     !> matrix size Np x Np
-     integer(c_int), value :: Np
+     !> matrix size Nrow x Ncol
+     integer(c_int), value :: Nrow
+     !> matrix size Nrow x Ncol
+     integer(c_int), value :: Ncol
      !> Total Number of K-points
      integer(c_int), value :: NK
      !> Total Number of E-points
@@ -88,7 +119,7 @@ module elphinel
      !> Green Function
      complex(c_double_complex) :: GG
      !> self energy
-     complex(c_double_complex) :: Self energy
+     complex(c_double_complex) :: Sigma
      !> 6 Buffers of size Np x Np
      complex(c_double_complex) :: sbuff1
      complex(c_double_complex) :: sbuff2
@@ -100,9 +131,12 @@ module elphinel
      complex(c_double_complex) :: fac_min
      !> prefactor of GG(E+wq)
      complex(c_double_complex) :: fac_plus
+     !> look-up array to store KK(iQ, iK, |zi - zj|)
+     real(c_double) :: KK(*) 
      !> call-back function K(k,q) for integration
-     type(C_FUNPTR), value :: callback
-   end subroutine self_energy
+     type(C_FUNPTR), value :: func
+   end function self_energy
+  end interface
 
 contains
 
@@ -112,7 +146,7 @@ contains
   ! @param coupling: coupling (energy units)
   ! @param wq: phonon frequence
   ! @param niter: fixed number of scba iterations
-  subroutine ElPhonInel_create(this, struct, basis, coupling, wq, Temp, niter)
+  subroutine ElPhonInel_create(this, struct, basis, coupling, wq, Temp, niter) 
 
     type(ElPhonInel), intent(inout) :: this
     type(TStruct_Info), intent(in) :: struct
@@ -132,11 +166,73 @@ contains
     this%Nq = bose(wq, Temp)
 
     ! Initialize the cache space
+    if (allocated(this%sigma_r)) call this%sigma_r%destroy()
     this%sigma_r = TMatrixCacheMem()
+    if (allocated(this%sigma_n)) call this%sigma_n%destroy()
     this%sigma_n = TMatrixCacheMem()
 
   end subroutine ElPhonInel_create
 
+  ! This function should be called before the SCBA loop
+  subroutine ElPhonInel_reinit(this, kpoints, kweights, kindex, nE_global, nE_local, &
+                  & dz, eps0, eps_inf, q0, cell_area, niter)
+    type(ElPhonInel), intent(inout) :: this
+    real(dp), intent(in) :: kpoints(:,:)
+    real(dp), intent(in) :: kweights(:)
+    integer, intent(in) :: kindex(:)
+    integer, intent(in) :: nE_global
+    integer, intent(in) :: nE_local
+    real(dp), intent(in) :: dz
+    real(dp), intent(in) :: eps0 
+    real(dp), intent(in) :: eps_inf
+    real(dp), intent(in) :: q0
+    real(dp), intent(in) :: cell_area 
+
+    integer :: nDeltaZ, nCentralAtoms, iZ, iQ, iK
+    real(dp) :: kq(3), kk(3), QQ(3), Q2, bb, z_mn
+    real(dp) :: zmin, zmax
+
+    this%kpoint = kpoints
+    this%kweight = kweights
+    this%local_kindex = kindex
+    this%nE_global = nE_global
+    this%nE_local = nE_local
+
+    ! Parameters for function Kappa
+    this%dz = dz
+    this%eps0 = eps0
+    this%eps_inf = eps_inf
+    this%q0 = q0
+    this%cell_area = cell_area
+    this%Ce = this%wq/2.0_dp/this%cell_area*(1.0_dp/this%eps_inf - 1.0_dp/this%eps0)
+
+    ! Compute the matrix Kmat as lookup table
+    nCentalAtoms = this%basis%nCentralAtoms
+
+    zmin = minval(this%basis%x(3,1:nCentralAtoms))
+    zmax = maxval(this%basis%x(3,1:nCentralAtoms))
+
+    nDeltaZ = nint(zmax - zmin)/this%dz
+
+    call log_allocate(Kmat, nDeltaZ, size(kweights), size(kweights))
+
+    do iQ = 1, size(kweights)
+      kq = this%kpoint(:, iQ) 
+      do iK = 1, size(kweights)
+        kk = this%kpoint(:, iK)
+        QQ = kk - kq
+        Q2 = dot_product(QQ, QQ) 
+        bb = sqrt(this%q0*this%q0 + Q2)
+        
+        do iZ = 0, nDeltaZ
+          z_mn = iZ * this%dz
+          Kf = (2.0_dp*Q2 + this%q0*this%q0*(1.0_dp-bb*z_mn))*exp(-bb*z_mn)/ (4.0_dp*bb**3)
+          Kmat(iZ,iK,iQ) = this%Ce * this%kweight(iQ) * Kf
+        end do
+      end do
+    end do
+
+  end subroutine ElPhonInel_reinit
 
   !> This interface should append
   !  the retarded self energy to ESH
@@ -148,7 +244,7 @@ contains
     integer, intent(in), optional :: spin
 
     integer :: n, npl, ii, ierr, jj
-    type(z_dns) :: tmp_blk
+    type(z_dns), pointer :: tmp_blk
     type(TMatLabel) :: label
 
     if (this%scba_iter .eq. 0) return
@@ -162,16 +258,16 @@ contains
     do jj = 1, npl
       label%row_block = jj
       label%col_block = jj
-      call sigma_r%retrieve(tmp_blk, label)
+      call this%sigma_r%retrieve_pointer(tmp_blk, label)
       ESH(jj, jj)%val = ESH(jj, jj)%val - tmp_blk%val
       call destroy(tmp_blk)
       if (jj .lt. npl) then
         label%row_block = jj
         label%col_block = jj + 1
-        call sigma_r%retrieve(tmp_blk, label)
-        ESH(jj, jj + 1)%val = ESH(jj, jj + 1)%val - tmp_blk
+        call this%sigma_r%retrieve_pointer(tmp_blk, label)
+        ESH(jj, jj + 1)%val = ESH(jj, jj + 1)%val - tmp_blk%val
         call destroy(tmp_blk)
-        ESH(jj + 1, jj)%val = ESH(jj + 1, jj)%val - tmp_blk
+        ESH(jj + 1, jj)%val = ESH(jj + 1, jj)%val - tmp_blk%val
         call destroy(tmp_blk)
       end if
     end do
@@ -181,16 +277,67 @@ contains
 
   !> Returns the lesser (n) Self Energy in block format
   !
-  subroutine get_sigma_n(this, blk_sigma_n, en_index, k_index, spin)
+  subroutine get_sigma_n_blk(this, blk_sigma_n, en_index, k_index, spin)
     class(ElPhonInel) :: this
     type(z_dns), dimension(:,:), intent(inout) :: blk_sigma_n
     integer, intent(in), optional :: en_index
     integer, intent(in), optional :: k_index
     integer, intent(in), optional :: spin
+    
+    type(z_dns), pointer :: tmp_blk
+    type(TMatLabel) :: label
+    integer :: ii, jj
 
     if (this%scba_iter .eq. 0) return
+    
+    label%kpoint = k_index
+    label%energy_point = en_index
+    label%spin = 0
+     
+    ! Retrieve the diagonal blocks
+    do ii = 1, size(blk_sigma_n, 1) 
+      label%row_block = ii
+      label%col_block = ii      
+      call this%sigma_r%retrieve(blk_sigma_n(ii,ii), label)
+    end do
 
-  end subroutine get_sigma_n
+  end subroutine get_sigma_n_blk
+
+
+  !> Returns the lesser (n) Self Energy for a given block
+  !
+  subroutine get_sigma_n_mat(this, sigma_n, ii, jj, en_index, k_index, spin)
+    class(ElPhonInel) :: this
+    type(z_dns), intent(out) :: sigma_n
+    integer, intent(in) :: ii
+    integer, intent(in) :: jj 
+    integer, intent(in), optional :: en_index
+    integer, intent(in), optional :: k_index
+    integer, intent(in), optional :: spin
+    
+    type(TMatLabel) :: label
+
+    if (this%scba_iter .eq. 0) return
+    
+    label%row_block = ii
+    label%col_block = jj
+    label%kpoint = 0
+    label%energy_point = 0
+    label%spin = 0
+    
+    if (present(k_index)) then
+      label%kpoint = k_index
+    end if
+    if (present(k_index)) then
+      label%energy_point = en_index
+    end if
+    if (present(spin)) then
+      label%spin = spin
+    end if
+      
+    call this%sigma_r%retrieve(sigma_n, label)
+
+  end subroutine get_sigma_n_mat
 
 
   !> Give the Gr at given energy point to the interaction
@@ -201,8 +348,29 @@ contains
     integer, intent(in), optional :: k_index
     integer, intent(in), optional :: spin
 
-    ! here we need to bind the pointer in negf
+    type(TMatLabel) :: label
+    integer :: ii, jj, nbl
 
+    label%kpoint = 0
+    label%energy_point = 0
+    label%spin = 0
+    
+    if (present(k_index)) then
+      label%kpoint = k_index
+    end if
+    if (present(k_index)) then
+      label%energy_point = en_index
+    end if
+    if (present(spin)) then
+      label%spin = spin
+    end if
+    
+    ! Just store the diagonal blocks for now  
+    do ii = 1, size(Gr,1)
+      label%row_block = ii
+      label%col_block = ii      
+      call this%G_r%add(Gr(ii,ii), label)
+    end do
 
   end subroutine set_Gr
 
@@ -215,7 +383,26 @@ contains
     integer, intent(in), optional :: k_index
     integer, intent(in), optional :: spin
 
-    ! here we need to bind the pointer in negf
+    label%kpoint = 0
+    label%energy_point = 0
+    label%spin = 0
+    
+    if (present(k_index)) then
+      label%kpoint = k_index
+    end if
+    if (present(k_index)) then
+      label%energy_point = en_index
+    end if
+    if (present(spin)) then
+      label%spin = spin
+    end if
+    
+    ! Just store the diagonal blocks for now  
+    do ii = 1, size(Gn,1)
+      label%row_block = ii
+      label%col_block = ii      
+      call this%G_n%add(Gn(ii,ii), label)
+    end do
 
   end subroutine set_Gn
 
@@ -233,6 +420,8 @@ contains
     complex(c_double_complex), allocatable :: sbuff1(:,:), rbuff1(:,:)
     complex(c_double_complex), allocatable :: sbuff2(:,:), rbuff2(:,:)
     complex(c_double_complex), allocatable :: sbuffH(:,:), rbuffH(:,:)
+  
+    type(C_PTR), allocatable :: pGG(:,:), pSigma(:,:)
 
     nbl = this%struct%num_PLs
 
@@ -249,22 +438,23 @@ contains
       call log_allocate(sbuffH, Np, Np)
       call log_allocate(rbuffH, Np, Np)
 
-      NK =
-      NKloc =
-      NE =
-      NEloc =
+      NK = size(this%kpoint,2)
+      NKloc = size(this%kweight)
+      NE = this%nE_global
+      NEloc = this%nE_local
 
-      iEshift = nint(this%wq/dE)
+      iEshift = nint(this%wq/this%dE)
 
-      factor_minus = this%Nq + 1
+      factor_min = this%Nq + 1
       factor_plus = this%Nq
 
-      mat_Gr = G_r%retrieve(iE, ik, ispin, ibl, ibl)
+      ! setup the array of pointers to G_r and sigma_r 
+      !mat_Gr = this%G_r%retrieve_pointer
 
       ! Call to SEBASTIAN c-function to get GG
-      self_energy(Np, NK, NE, NKloc, NEloc, iEshift, mat_Gr, sigma_r, &
-            & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, &
-            & cart_comm, factor_min, factor_plus, kappa)
+      !self_energy(Np, NK, NE, NKloc, NEloc, iEshift, mat_Gr, sigma_r, &
+      !      & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, &
+      !      & cart_comm, factor_min, factor_plus, kappa)
 
     end do
 
@@ -285,11 +475,69 @@ contains
 
 
   !> Integral over qz of the electron-phonon polar optical couping.
-  real(c_double) function kappa() bind(c, name='kappa')
+  ! 
+  !  Kappa = Sum_G [ w(q) Ce  I(k, q+G, |z_mu - z_nu|) ]
+  !
+  !  Ce = e^2/eps0 hbar wq/2 (eps0/eps_inf - 1)
+  !  Q = k - q 
+  !  b = sqrt(q0^2 + Q^2)
+  !  I = (2Q^2 + q0^2 (1-b |z_mu - z_nu|)) exp(-b |z_mu - z_nu|)/ 4 b^3
+  !
+  ! |U|^2 = En*L En * L^2   <= OK
+  ! Ce ~ En^2 L;  b ~ 1/L;  I ~ L;  =>  kappa ~ En^2 L^2 
+  !
+  ! =>> Must divide by the Area of the cell 
+  !
+  ! LOOKUP TABLE: KK(|zi - zj|, iQ, iK)
+  !
+  ! NK ~ 256 => NK*NK = 65563
+  ! Natom = 1000 * 10 (npl) = 10,000
+  ! Option to approximately map zi's onto a regular grid: 
+  ! Essentially setup a binning parameter. e.g. Si unit cell is 5.4 AA.
+  ! Can be pre-computed for every block just beforehand
+  ! Could place a resolution of 0.01 AA => 540 points  
+  ! => 65563 * 1000 * 8 ~ 500 Mb
+  ! We need a mapping: matrix index(mu) -> bin(iz)
 
+  real(c_double) function kappa(handler, iK, iQ, mu, nu) bind(c, name='kappa')
+    implicit none
+    !> handle as c_ptr
+    type(c_ptr), intent(in), value :: handler    
+    !> Index of k (final k-vector)
+    integer(c_int), intent(in), value :: iK
+    !> Index of q (initial k-vector)
+    integer(c_int), intent(in), value :: iQ
+    !> Index of mu in the array 
+    integer(c_int), intent(in), value :: mu 
+    !> Index of nu in the array 
+    integer(c_int), intent(in) :: nu
 
+    real(dp) :: Ce, kk(3), kq(3), QQ(3), bb, z_mu, z_nu, z_mn, Kf, Q2
+    integer :: atm_index, loc_iK, loc_iQ     
+    type(ElPhonInel), pointer :: this
+
+    !> cast the c_ptr to the instance Telph
+    call c_f_pointer(handler, this)
+
+    ! Forget for the moment Umklapp. G = 0
+
+    atm_index = this%basis%matrixToBasis(mu)
+    z_mu = this%basis%x(3, atm_index) 
+    atm_index = this%basis%matrixToBasis(nu)
+    z_nu = this%basis%x(3, atm_index) 
+    z_mn = abs(z_mu - z_nu)
+
+    kk = this%kpoint(:, iK)
+    kq = this%kpoint(:, iQ) 
+
+    QQ = kk - kq
+    Q2 = dot_product(QQ, QQ) 
+    bb = sqrt(this%q0*this%q0 + Q2)
+
+    Kf = (2.0_dp*Q2 + this%q0*this%q0*(1.0_dp-bb*z_mn))*exp(-bb*z_mn)/ (4.0_dp*bb**3)
+    
+    kappa = this%Ce * this%kweight(iQ) * Kf
 
   end function kappa
-
 
 end module elphinel

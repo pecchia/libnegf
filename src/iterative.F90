@@ -126,7 +126,7 @@ CONTAINS
     end associate
 
     !! Add interaction self energy contribution, if any
-    call add_sigma_r(negf%interArr, ESH)
+    call add_sigma_r(negf%interactArray, ESH)
 
     call allocate_gsm(gsmr,nbl)
     call calculate_gsmr_blocks(ESH,nbl,2)
@@ -142,7 +142,7 @@ CONTAINS
     call destroy_gsm(gsmr)
     call deallocate_gsm(gsmr)
 
-    call set_Gr(negf%interArr, Gr, negf%iE)
+    call set_Gr(negf%interactArray, Gr, negf%iE)
 
     call blk2csr(Gr,negf%str,negf%S,Grout)
 
@@ -233,7 +233,7 @@ CONTAINS
     end do
 
     ! Add interaction self energy if any and initialize scba counter
-    call add_sigma_r(negf%interArr, ESH)
+    call add_sigma_r(negf%interactArray, ESH)
 
     call allocate_gsm(gsmr,nbl)
     call allocate_gsm(gsml,nbl)
@@ -241,7 +241,7 @@ CONTAINS
     ! Determine the leftmost and rightmost contact blocks to determine
     ! which column blocks are needed and hence which gsmr and gsml. In the case
     ! of interactions we need to be able to calculate all columns.
-    if (allocated(negf%interArr)) then
+    if (allocated(negf%interactArray)) then
       rbl = 1
       lbl = nbl - 1
     else
@@ -264,7 +264,7 @@ CONTAINS
     call calculate_Gr_tridiag_blocks(ESH,rbl+1,nbl)
     call calculate_Gr_tridiag_blocks(ESH,rbl-1,1)
     !Passing Gr to interaction that builds Sigma_n
-    call set_Gr(negf%interArr, Gr, negf%iE)
+    call set_Gr(negf%interactArray, Gr, negf%iE)
 
     !Computes the columns of Gr for the contacts != reference
     ! Keep track of the calculated column indices in the array Gr_columns.
@@ -279,7 +279,7 @@ CONTAINS
 
     !If interactions are not present we can already destroy gsmr, gsml.
     !Otherwise they are still needed to calculate columns on-the-fly.
-    if (.not.allocated(negf%interArr)) then
+    if (.not.allocated(negf%interactArray)) then
       call destroy_gsm(gsmr)
       call deallocate_gsm(gsmr)
       call destroy_gsm(gsml)
@@ -294,7 +294,7 @@ CONTAINS
 
     ! Adding el-ph part: G^n = G^n + G^r Sigma^n G^a (at first call does nothing)
     ! NOTE:  calculate_Gn has factor [f_i - f_ref], hence all terms will contain this factor
-    if (allocated(negf%interArr)) then
+    if (allocated(negf%interactArray)) then
       call calculate_Gn_tridiag_elph_contributions(negf,ESH,Gn,Gr_columns)
       call destroy_gsm(gsmr)
       call deallocate_gsm(gsmr)
@@ -304,7 +304,7 @@ CONTAINS
 
 
     !Passing G^n to interaction that builds Sigma^n
-    call set_Gn(negf%interArr, Gn, negf%iE)
+    call set_Gn(negf%interactArray, Gn, negf%iE)
 
     call blk2csr(Gn,negf%str,negf%S,Glout)
 
@@ -382,7 +382,7 @@ CONTAINS
     end do
 
     !! Add el-ph self energy if any
-    call add_sigma_r(negf%interArr, ESH)
+    call add_sigma_r(negf%interactArray, ESH)
 
     call allocate_gsm(gsmr,nbl)
     call allocate_gsm(gsml,nbl)
@@ -399,7 +399,7 @@ CONTAINS
     call calculate_Gr_tridiag_blocks(ESH,2,nbl)
 
     !! Give Gr to interaction model if any
-    call set_Gr(negf%interArr, Gr, negf%iE)
+    call set_Gr(negf%interactArray, Gr, negf%iE)
 
     !! Never calculate outer blocks
     call allocate_blk_dns(Gn, nbl)
@@ -418,7 +418,7 @@ CONTAINS
     end do
     call calculate_Gn_tridiag_blocks(ESH, SelfEneR, frm, ref, negf%str, Gn)
 
-    if (allocated(negf%interArr)) then
+    if (allocated(negf%interactArray)) then
       call calculate_Gn_tridiag_elph_contributions(negf, ESH, Gn, Gr_columns)
     end if
 
@@ -457,7 +457,40 @@ CONTAINS
 
   end subroutine iterative_meir_wingreen
 
+  !---------------------------------------------------------------------
+  !  Calculate the layer current per unit energy
+  !
+  !    I_LL'(E) = Tr[(ES-H)_LL' * Gn_L'L(E)-(ES-H)_L'L * Gn_LL'(E)]
+  !
+  subroutine iterative_layer_current(negf,E,curr_mat)
+    type(Tnegf), intent(inout) :: negf
+    real(dp) :: E
+    real(dp), dimension(:) :: curr_mat
 
+    integer :: nbl, ii
+    type(z_DNS) :: work1
+    complex(dp), parameter :: minusone = (-1.0_dp, 0.0_dp)
+
+    nbl = negf%str%num_PLs
+
+    if (size(curr_mat) .ne. nbl-1) then
+         stop 'ERROR: curr_mat with wrong size in iterative_layer_current'
+   end if
+
+    do ii = 1, nbl-1
+      call prealloc_mult(ESH(ii,ii+1),Gn(ii+1,ii),work1)
+      call prealloc_mult(ESH(ii+1,ii),Gn(ii,ii+1), minusone, work1)
+      curr_mat(ii) = trace(work1) 
+    end do
+    
+    if (negf%tDestroyBlk) then
+      call destroy_all_blk()
+    end if
+
+  end subroutine iterative_layer_current
+
+
+  !---------------------------------------------------------------------
   subroutine destroy_all_blk()
     call destroy_blk(Gr)
     DEALLOCATE(Gr)
@@ -468,44 +501,44 @@ CONTAINS
   end subroutine
 
   ! Add all Self-enrgies to the Hamiltonian
-  subroutine add_sigma_r(interArr, ESH)
-    type(TInteractionArray), allocatable :: interArr(:)
+  subroutine add_sigma_r(interactArray, ESH)
+    type(TInteractionArray), allocatable :: interactArray(:)
     type(z_DNS) :: ESH(:,:)
 
     integer :: kk
-    if (allocated(interArr)) then
-      do kk = 1, size(interArr)
-        call interArr(kk)%inter%add_sigma_r(ESH)
+    if (allocated(interactArray)) then
+      do kk = 1, size(interactArray)
+        call interactArray(kk)%inter%add_sigma_r(ESH)
       end do
     end if
   end subroutine add_sigma_r
 
   ! Provides Gr to the interaction models.
   ! In some case the self/energies are computed
-  subroutine set_Gr(interArr, Gr, iE)
-    type(TInteractionArray), allocatable :: interArr(:)
+  subroutine set_Gr(interactArray, Gr, iE)
+    type(TInteractionArray), allocatable :: interactArray(:)
     type(z_DNS) :: Gr(:,:)
     integer :: iE
 
     integer :: kk
-    if (allocated(interArr)) then
-      do kk = 1, size(interArr)
-        call interArr(kk)%inter%set_Gr(Gr, iE)
+    if (allocated(interactArray)) then
+      do kk = 1, size(interactArray)
+        call interactArray(kk)%inter%set_Gr(Gr, iE)
       end do
     end if
   end subroutine set_Gr
 
   ! Provides Gn to the interaction models.
   ! In some case the self/energies are computed
-  subroutine set_Gn(interArr, Gn, iE)
-    type(TInteractionArray), allocatable :: interArr(:)
+  subroutine set_Gn(interactArray, Gn, iE)
+    type(TInteractionArray), allocatable :: interactArray(:)
     type(z_DNS) :: Gn(:,:)
     integer :: iE
 
     integer :: kk
-    if (allocated(interArr)) then
-      do kk = 1, size(interArr)
-        call interArr(kk)%inter%set_Gn(Gn, iE)
+    if (allocated(interactArray)) then
+      do kk = 1, size(interactArray)
+        call interactArray(kk)%inter%set_Gn(Gn, iE)
       end do
     end if
   end subroutine set_Gn
@@ -1515,8 +1548,8 @@ CONTAINS
     ! The block sigma n is made available from el-ph model
     ! Note: the elph models could not keep a copy and calculate it
     ! on the fly. You have to rely on the local copy
-    if (allocated(negf%interArr)) then
-      call negf%interArr(1)%inter%get_sigma_n(Sigma_ph_n, negf%ie)
+    if (allocated(negf%interactArray)) then
+      call negf%interactArray(1)%inter%get_sigma_n(Sigma_ph_n, negf%ie)
     end if
 
     !! Calculate the diagonal and off diagonal (if needed) blocks of Gn

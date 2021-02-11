@@ -2282,7 +2282,7 @@ CONTAINS
 
     IF (allocated(C_dns%val)) THEN
       IF(C_dns%nrow .ne. M .or. C_dns%ncol .ne. N) THEN
-         call error_msg('(zmultdnss) C',MISMATCH)
+         call error_msg('(zmatmul) C',MISMATCH)
       ENDIF
       beta = (1.d0,0.d0)
     ELSE

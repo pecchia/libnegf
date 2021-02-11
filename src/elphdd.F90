@@ -47,7 +47,8 @@ module elphdd
   contains
 
     procedure :: add_sigma_r
-    procedure :: get_sigma_n
+    procedure :: get_sigma_n_blk
+    procedure :: get_sigma_n_mat
     procedure :: set_Gr
     procedure :: set_Gn
     procedure :: compute_Sigma_r
@@ -115,7 +116,7 @@ contains
 
   !> Returns the lesser (n) Self Energy in block format
   !
-  subroutine get_sigma_n(this, blk_sigma_n, en_index, k_index, spin)
+  subroutine get_sigma_n_blk(this, blk_sigma_n, en_index, k_index, spin)
     class(ElPhonDephD) :: this
     type(z_dns), dimension(:,:), intent(inout) :: blk_sigma_n
     integer, intent(in), optional  :: en_index
@@ -140,7 +141,17 @@ contains
       end do
     enddo
 
-  end subroutine get_sigma_n
+  end subroutine get_sigma_n_blk
+  
+  subroutine get_sigma_n_mat(this, sigma_n, ii, jj, en_index, k_index, spin)
+    class(ElPhonDephD) :: this
+    type(z_dns), intent(out) :: sigma_n
+    integer, intent(in) :: ii
+    integer, intent(in) :: jj
+    integer, intent(in), optional  :: en_index
+    integer, intent(in), optional  :: k_index
+    integer, intent(in), optional  :: spin
+  end subroutine get_sigma_n_mat
 
   !> Give the Gr at given energy point to the interaction
   subroutine set_Gr(this, Gr, en_index, k_index, spin)

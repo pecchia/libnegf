@@ -730,7 +730,7 @@ contains
 
         if (id0.and.negf%verbose.gt.VBT) call write_clock
 
-        if (allocated(negf%interArr)) then
+        if (allocated(negf%interactArray)) then
           call write_real_info(negf%verbose,'SCBA error', scba_error)
         end if
 
@@ -801,7 +801,7 @@ contains
        negf%en_grid(i)%pt = ioffset + i
        negf%en_grid(i)%pt_path = i
        negf%en_grid(i)%Ec = cmplx(pnts(i),negf%delta,dp)
-       negf%en_grid(i)%wght = negf%wght * negf%g_spin * wght(i)/(2.d0 *pi)
+       negf%en_grid(i)%wght = negf%kwght * negf%g_spin * wght(i)/(2.d0 *pi)
     enddo
 
     deallocate(wght)
@@ -880,7 +880,7 @@ contains
 
        if (id0.and.negf%verbose.gt.VBT) call write_clock
 
-       if (allocated(negf%interArr)) then
+       if (allocated(negf%interactArray)) then
          call write_real_info(negf%verbose,'SCBA error',scba_error)
        end if
 
@@ -962,7 +962,7 @@ contains
        negf%en_grid(i)%pt_path = i
        negf%en_grid(i)%Ec = cmplx(pnts(i),negf%delta,dp)
        ff = fermi(pnts(i),muref,KbT)
-       negf%en_grid(i)%wght = negf%g_spin * negf%wght * ff * wght(i) / (2.d0 * pi)
+       negf%en_grid(i)%wght = negf%g_spin * negf%kwght * ff * wght(i) / (2.d0 * pi)
     enddo
 
     deallocate(wght)
@@ -1025,7 +1025,7 @@ contains
        negf%en_grid(i)%pt_path = i
        negf%en_grid(i)%Ec = cmplx(pnts(i),negf%delta,dp)
        ff = fermi(-pnts(i),-muref,KbT)
-       negf%en_grid(i)%wght = negf%g_spin * negf%wght * ff * wght(i) / (2.d0 * pi)
+       negf%en_grid(i)%wght = negf%g_spin * negf%kwght * ff * wght(i) / (2.d0 * pi)
     enddo
 
     deallocate(wght)
@@ -1194,8 +1194,8 @@ contains
     integer :: i, ncont, Nsteps
     real(dp) :: wqmax
 
-    if (allocated(negf%interArr)) then
-      Nsteps=nint((negf%Emax-negf%Emin+get_max_wq(negf%interArr))/negf%Estep) + 1
+    if (allocated(negf%interactArray)) then
+      Nsteps=nint((negf%Emax-negf%Emin+get_max_wq(negf%interactArray))/negf%Estep) + 1
     else
       Nsteps=nint((negf%Emax-negf%Emin)/negf%Estep) + 1
     end if
@@ -1208,7 +1208,7 @@ contains
        negf%en_grid(i)%pt = i
        negf%en_grid(i)%pt_path = i
        negf%en_grid(i)%Ec = cmplx(negf%Emin + negf%Estep*(i-1), 0.0, dp)
-       negf%en_grid(i)%wght = negf%wght * negf%g_spin
+       negf%en_grid(i)%wght = negf%kwght * negf%g_spin
     enddo
 
     ! distribute energy grid
@@ -1306,7 +1306,7 @@ contains
           call calculate_transmissions(negf%H,negf%S,Ec,SelfEneR,negf%ni,negf%nf, &
                              & negf%str, negf%tun_proj, TUN_MAT)
 
-          negf%tunn_mat(i,:) = TUN_MAT(:) * negf%wght
+          negf%tunn_mat(i,:) = TUN_MAT(:) * negf%kwght
        else
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Tunneling and DOS')
           LEDOS(:) = 0.d0
@@ -1314,8 +1314,8 @@ contains
           call calculate_transmissions_and_dos(negf%H,negf%S,Ec,SelfEneR,GS,negf%ni,negf%nf, &
                              & negf%str, negf%tun_proj, TUN_MAT, negf%dos_proj, LEDOS)
 
-          negf%tunn_mat(i,:) = TUN_MAT(:) * negf%wght
-          negf%ldos_mat(i,:) = LEDOS(:) * negf%wght
+          negf%tunn_mat(i,:) = TUN_MAT(:) * negf%kwght
+          negf%ldos_mat(i,:) = LEDOS(:) * negf%kwght
        endif
 
        if (id0.and.negf%verbose.gt.VBT) call write_clock
@@ -1406,14 +1406,14 @@ contains
       call write_real_info(negf%verbose, 'Average number of iterations', ncyc)
 
       ! Calculate the SCBA before meir-wingreen current so el-ph self-energies are stored
-      if (allocated(negf%interArr)) then
+      if (allocated(negf%interactArray)) then
 
          call negf%scbaDriver%init(1.0e-7_dp, .false.)
-         scba_niter = get_max_niter(negf%interArr)
+         scba_niter = get_max_niter(negf%interactArray)
 
          do scba_iter = 0, scba_niter
 
-            call negf%scbaDriver%set_scba_iter(scba_iter, negf%interArr)
+            call negf%scbaDriver%set_scba_iter(scba_iter, negf%interactArray)
 
             call calculate_Gn_neq_components(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,Gn,outer)
 
@@ -1431,7 +1431,7 @@ contains
       ! Compute currents based on computed components
       call iterative_meir_wingreen(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,curr_mat)
 
-      negf%curr_mat(ii,:) = curr_mat(:) * negf%wght
+      negf%curr_mat(ii,:) = curr_mat(:) * negf%kwght
 
       if (id0.and.negf%verbose.gt.VBT) call write_clock
       do icont=1,ncont
@@ -1487,40 +1487,22 @@ contains
     do j1 = 1,ncont
       frm(j1)=fermi(real(Ec), negf%cont(j1)%mu, negf%cont(j1)%kbT_t)
     enddo
-    ! ---------------------------------------------------------------------
-    ! 0th order GF on the extended energy range
-    ! ---------------------------------------------------------------------
-    !call write_info(negf%verbose, 'CALCULATION OF 0th ORDER GF', 0)
-    !do j1 = 1, size(negf%kproc)
-    !  negf%iKpoint = negf%kproc(j1)
-    !  do ii = 1, Nstep
-    !    call write_point(negf%verbose, negf%en_grid(ii), size(negf%en_grid))
-    !    if (negf%en_grid(ii)%cpu /= id) cycle
-    !    Ec = negf%en_grid(ii)%Ec
-    !    negf%iE = negf%en_grid(ii)%pt
-    !    if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
-    !    call compute_contacts(Ec+j*negf%delta, negf, ncyc, Tlc, Tcl, SelfEneR, GS)
-    !    if (id0.and.negf%verbose.gt.VBT) call write_clock
-    !    call write_real_info(negf%verbose, 'Average number of iterations', ncyc)
-    !    call calculate_Gn_neq_components(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,Gn,outer)
-    !  end do
-    !end do
-
-    !
-
-
+    
     ! ---------------------------------------------------------------------
     ! SCBA Iteration
     ! ---------------------------------------------------------------------
     call negf%scbaDriver%init(1.0e-7_dp, .false.)
-    scba_niter = get_max_niter(negf%interArr)
+    scba_niter = get_max_niter(negf%interactArray)
 
     do scba_iter = 0, scba_niter
       call write_info(negf%verbose, 'SCBA ITERATION', scba_iter)
 
-      ! Loop over k-points
-      do j1 = 1, size(negf%kproc)
-        negf%iKpoint = negf%kproc(j1)
+      ! Loop over local k-points
+      do iK = 1, size(negf%local_k_index)
+        
+        negf%iKpoint = negf%local_k_index(iK)
+        negf%kwght = negf%kweights(negf%iKpoint)
+        print*,'Processing local k-point',negf%iKpoint
 
         !! Loop over energy points
         do ii = 1, Nstep
@@ -1530,42 +1512,54 @@ contains
           Ec = negf%en_grid(ii)%Ec
           negf%iE = negf%en_grid(ii)%pt
 
+
+          ! ---------------------------------------------------------------------
+          ! Compute contact GF
+          ! ---------------------------------------------------------------------
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
           call compute_contacts(Ec+j*negf%delta, negf, ncyc, Tlc, Tcl, SelfEneR, GS)
           if (id0.and.negf%verbose.gt.VBT) call write_clock
 
+          ! ---------------------------------------------------------------------
+          ! Compute block tri-diagonal Gr and Gn 
+          ! ---------------------------------------------------------------------
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Gn ')
+          ! Avoids cleanup of Gn and ESH components for later use
           negf%tDestroyBlk = .false.
           call calculate_Gn_neq_components(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,Gn,outer)
           if (id0.and.negf%verbose.gt.VBT) call write_clock
 
-          ! Compute currents based on computed components
-          call iterative_layer_current(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,curr_mat)
+          ! ---------------------------------------------------------------------
+          ! Compute layer-to-layer currents and release memory 
+          ! ---------------------------------------------------------------------
+          negf%tDestroyBlk = .true.
+          call iterative_layer_current(negf,real(Ec),curr_mat)
 
-          negf%curr_mat(ii,:) = curr_mat(:) * negf%wght
+          negf%curr_mat(ii,:) = curr_mat(:) * negf%kwght 
 
         end do
 
       end do
 
-      ! SEBASTIAN CODE HERE
-      ! loop over the tri/diagonal Gr, Gn
-      call self_energy( Gr, Sigma_r, Nq+1,Nq)
-      call self_energy( Gr, Sigma_r, imag*0.5_dp,-imag*0.5_dp)
-      call self_energy( Gn, Sigma_n, Nq,Nq+1)
+      ! ---------------------------------------------------------------------
+      ! COMPUTE SELF-ENRGIES
+      ! ---------------------------------------------------------------------
+      
+      !call self_energy( Gr, Sigma_r, Nq+1, Nq)
+      !call self_energy( Gr, Sigma_r, imag*0.5_dp,-imag*0.5_dp)
+      !call self_energy( Gn, Sigma_n, Nq,Nq+1)
 
 
 
-        call negf%scbaDriver%check_Mat_convergence(Gn)
-        call negf%scbaDriver%destroy()
+      call negf%scbaDriver%check_Mat_convergence(Gn)
+      call negf%scbaDriver%destroy()
 
-        do icont=1,ncont
-          call destroy(Tlc(icont),Tcl(icont),SelfEneR(icont),GS(icont))
-        end do
-
+      do icont=1,ncont
+        call destroy(Tlc(icont),Tcl(icont),SelfEneR(icont),GS(icont))
       end do
 
     end do
+
     call log_deallocate(curr_mat)
     negf%refcont = ref_bk
 
@@ -1598,13 +1592,13 @@ contains
 
     scba_error = 0.0_dp
 
-    if (.not.allocated(negf%interArr)) then
+    if (.not.allocated(negf%interactArray)) then
       max_scba_iter = 0
     else
-      max_scba_iter = get_max_niter(negf%interArr)
+      max_scba_iter = get_max_niter(negf%interactArray)
       call negf%scbaDriver%init(1.0e-7_dp, .false.)
       do scba_iter = 1, max_scba_iter
-        call negf%scbaDriver%set_scba_iter(scba_iter, negf%interArr)
+        call negf%scbaDriver%set_scba_iter(scba_iter, negf%interactArray)
         call negf%scbaDriver%check_Mat_convergence(Gr)
         if (negf%scbaDriver%is_converged()) exit
         call destroy(Gr)
@@ -1650,14 +1644,14 @@ contains
     scba_error = 0.0_dp
     ! In case of interactions (only elastic supported now) we go into
     ! the Self Consistent Born Approximation loop.
-    if (.not.allocated(negf%interArr)) then
+    if (.not.allocated(negf%interactArray)) then
       max_scba_iter = 0
     else
-      max_scba_iter = get_max_niter(negf%interArr)
+      max_scba_iter = get_max_niter(negf%interactArray)
       call negf%scbaDriver%init(1.0e-7_dp, .false.)
 
       do scba_iter = 1, max_scba_iter
-        call negf%scbaDriver%set_scba_iter(scba_iter, negf%interArr)
+        call negf%scbaDriver%set_scba_iter(scba_iter, negf%interactArray)
         call negf%scbaDriver%check_Mat_convergence(Gn)
         if (negf%scbaDriver%is_converged()) exit
         call destroy(Gn)
@@ -1825,7 +1819,7 @@ contains
           call calculate_transmissions(negf%H,negf%S,Ec,SelfEneR,negf%ni,negf%nf, &
                              & negf%str, negf%tun_proj, TUN_MAT)
 
-          negf%tunn_mat(i,:) = TUN_MAT(:) * negf%wght
+          negf%tunn_mat(i,:) = TUN_MAT(:) * negf%kwght
        else
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Tunneling and DOS')
           LEDOS(:) = 0.d0
@@ -1833,8 +1827,8 @@ contains
           call calculate_transmissions_and_dos(negf%H,negf%S,Ec,SelfEneR,GS,negf%ni,negf%nf, &
                              & negf%str, negf%tun_proj, TUN_MAT, negf%dos_proj, LEDOS)
 
-          negf%tunn_mat(i,:) = TUN_MAT(:) * negf%wght
-          negf%ldos_mat(i,:) = LEDOS(:) * negf%wght
+          negf%tunn_mat(i,:) = TUN_MAT(:) * negf%kwght
+          negf%ldos_mat(i,:) = LEDOS(:) * negf%kwght
        endif
 
        if (id0.and.negf%verbose.gt.VBT) call write_clock

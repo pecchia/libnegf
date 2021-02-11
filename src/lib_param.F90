@@ -127,8 +127,6 @@ module lib_param
                                   ! See 'Numerical Heat Transfer, Part B', 51:333, 2007
     real(dp) :: eneconv           ! Energy conversion factor
     integer  :: spin = 1          ! spin component
-    real(dp) :: wght              ! k-point weight
-    integer :: iKpoint            ! k-point index
     character(1) :: DorE          ! Density or En.Density
 
     !! Contacts info
@@ -191,23 +189,30 @@ module lib_param
     logical    :: intDM           ! tells DM is internally allocated
 
     type(TStruct_Info) :: str     ! system structure
-    integer :: iE                 ! Energy point (index or the point)
-    complex(dp) :: Epnt           ! Energy point (complex)
-    integer :: local_en_points    ! Local number of energy points
+    integer :: iE                 ! Currently processed En point (index)
+    complex(dp) :: Epnt           ! Currently processed En point (value)
+    real(dp) :: kwght             ! currently processed k-point weight 
+    integer :: iKpoint            ! currently processed k-point (index)
+
+    ! Energy grid information 
     type(TEnGrid), dimension(:), allocatable :: en_grid
-    real(dp) :: int_acc           ! integration accuracy
+    integer :: local_en_points    ! Local number of energy points
+
+    ! Array to store all k-points and k-weights
+    real(dp), allocatable, dimension(:,:) :: kpoints
+    real(dp), allocatable, dimension(:) :: kweights
+    ! Array of local k-point indices
+    integer, allocatable, dimension(:) :: local_k_index
+    
+    type(mesh) :: emesh           ! energy mesh for adaptive Simpson
+    real(dp) :: int_acc           ! adaptive integration accuracy
+   
+    
     type(Telph) :: elph           ! electron-phonon data
     type(Tphph) :: phph           ! phonon-phonon data
 
-    type(mesh) :: emesh           ! energy mesh for adaptive Simpson
-    ! Array to store kpoints and kweights
-    real(dp), allocatable, dimension(:,:) :: kpoints
-    real(dp), allocatable, dimension(:) :: kweights
-    ! Array for k-point distribution
-    integer, allocatable, dimension(:) :: kproc
-
     ! Many Body Interactions as array of pointers
-    type(TInteractionArray), dimension(:), allocatable :: interArr
+    type(TInteractionArray), dimension(:), allocatable :: interactArray
     type(TScbaDriver) :: scbaDriver
 
     !! Output variables: these arrays are filled by internal subroutines to store
@@ -271,10 +276,10 @@ contains
     integer :: ii
     call elphondephd_create(elphdd_tmp, negf%str, coupling, niter)
     ii = negf%get_empty_slot()
-    if (ii > size(negf%interArr)) then
+    if (ii > size(negf%interactArray)) then
        stop 'ERROR: empty slot not found'
     end if
-    allocate(negf%interArr(ii)%inter, source=elphdd_tmp)
+    allocate(negf%interactArray(ii)%inter, source=elphdd_tmp)
 
   end subroutine set_elph_dephasing
 
@@ -290,10 +295,10 @@ contains
     integer :: ii
     call elphondephb_create(elphdb_tmp, negf%str, coupling, orbsperatom, niter)
     ii = negf%get_empty_slot()
-    if (ii > size(negf%interArr)) then
+    if (ii > size(negf%interactArray)) then
        stop 'ERROR: empty slot not found'
     end if
-    allocate(negf%interArr(ii)%inter, source=elphdb_tmp)
+    allocate(negf%interactArray(ii)%inter, source=elphdb_tmp)
   end subroutine set_elph_block_dephasing
 
   !> Set values for the semi-local electron phonon dephasing model
@@ -308,10 +313,10 @@ contains
     integer :: ii
     call elphondephs_create(elphds_tmp, negf%str, coupling, orbsperatom, negf%S, niter)
     ii = negf%get_empty_slot()
-    if (ii > size(negf%interArr)) then
+    if (ii > size(negf%interactArray)) then
        stop 'ERROR: empty slot not found'
     end if
-    allocate(negf%interArr(ii)%inter, source=elphds_tmp)
+    allocate(negf%interactArray(ii)%inter, source=elphds_tmp)
   end subroutine set_elph_s_dephasing
 
   !> create the array of interactions
@@ -319,7 +324,7 @@ contains
     class(Tnegf) :: this
     integer, intent(in) :: nInteractions
 
-    allocate(this%interArr(nInteractions))
+    allocate(this%interactArray(nInteractions))
 
   end subroutine create_interactions
 
@@ -329,13 +334,13 @@ contains
 
     integer :: ii
 
-    if (allocated(this%interArr)) then
-      do ii = 1, size(this%interArr)
-        if (allocated(this%interArr(ii)%inter)) then
-          deallocate(this%interArr(ii)%inter)
+    if (allocated(this%interactArray)) then
+      do ii = 1, size(this%interactArray)
+        if (allocated(this%interactArray(ii)%inter)) then
+          deallocate(this%interactArray(ii)%inter)
         end if
       end do
-      deallocate(this%interArr)
+      deallocate(this%interactArray)
     end if
 
   end subroutine destroy_interactions
@@ -345,8 +350,8 @@ contains
     class(TNegf) :: this
     integer :: ii
 
-    do ii = 1, size(this%interArr)
-      if (.not.allocated(this%interArr(ii)%inter)) exit
+    do ii = 1, size(this%interactArray)
+      if (.not.allocated(this%interactArray(ii)%inter)) exit
     end do
 
   end function get_empty_slot
@@ -365,7 +370,7 @@ contains
      this%ReadOldDM_SGFs = 1   ! Compute Surface G.F. do not save
      this%ReadOldT_SGFs = 1    ! Compute Surface G.F. do not save
 
-     this%wght = 1.d0
+     this%kwght = 1.d0
      this%ikpoint = 1
 
      this%Ec = 0.d0
@@ -486,7 +491,7 @@ contains
      write(io,*) 'intHS= ',this%intHS
      write(io,*) 'intDM= ',this%intDM
      write(io,*) 'kp= ', this%ikpoint
-     write(io,*) 'wght= ', this%wght
+     write(io,*) 'kwght= ', this%kwght
      write(io,*) 'E= ',this%E
      write(io,*) 'outer= ', this%outer
      write(io,*) 'DOS= ',this%dos

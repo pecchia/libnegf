@@ -20,7 +20,7 @@
 
 
 module ln_structure
-
+use ln_precision
 implicit none
 private
 
@@ -51,6 +51,7 @@ end type TStruct_Info
 
 type TBasisCenters
   real(dp), dimension(:,:), allocatable :: x
+  integer :: nCentralAtoms
   integer, dimension(:), allocatable :: matrixToBasis
 end type TBasisCenters
 
@@ -186,9 +187,10 @@ contains
 
   !--------------------------------------------------------------------
   ! Initialize TBasisCenters
-  subroutine create_TBasis(this, coord, basisToMatix, matrixToBasis)
+  subroutine create_TBasis(this, coord, nCentral, basisToMatrix, matrixToBasis)
     type(TBasisCenters) :: this
     real(dp), intent(in) :: coord(:,:)
+    integer, intent(in) :: nCentral
     integer, intent(in), optional :: basisToMatrix(:)
     integer, intent(in), optional :: matrixToBasis(:)
 
@@ -200,6 +202,7 @@ contains
 
     allocate(this%x(size(coord,1), size(coord,2)))
     this%x = coord
+    this%nCentralAtoms = nCentral
 
     if (present(matrixToBasis)) then
       allocate(this%matrixToBasis(size(matrixToBasis)))

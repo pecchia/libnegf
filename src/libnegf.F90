@@ -556,12 +556,12 @@ contains
 
   !> subroutine used to setup kpoints
   !  kpoints(:)  kweights(:)  are global
-  !  kproc(:) is a local array storing the local indices
-  subroutine set_kpoints(negf, kpoints, kweights, kproc)
+  !  local_kindex(:) is a local array storing the local indices
+  subroutine set_kpoints(negf, kpoints, kweights, local_kindex)
     type(Tnegf) :: negf
     real(dp), intent(in) :: kpoints(:,:)
     real(dp), intent(in) :: kweights(:)
-    real(dp), intent(in) :: kproc(:)
+    real(dp), intent(in) :: local_kindex(:)
 
     if (size(kpoints,2) /= size(kweights)) then
        STOP 'Error: size of kpoints do not match'
@@ -571,8 +571,8 @@ contains
     call log_allocate(negf%kweights,size(kweights))
     negf%kweights = kweights
 
-    call log_allocate(negf%kproc,size(kproc))
-    negf%kproc = kproc
+    call log_allocate(negf%local_k_index,size(local_kindex))
+    negf%local_k_index = local_kindex
 
   end subroutine set_kpoints
 
@@ -631,7 +631,7 @@ contains
     params%nf=0; params%nf(1:nn) = negf%nf(1:nn)
     params%eneconv = negf%eneconv
     params%spin = negf%spin
-    params%wght = negf%wght
+    params%wght = negf%kwght
     params%ikpoint = negf%ikpoint
     params%DorE = negf%DorE
     params%min_or_max = negf%min_or_max
@@ -704,7 +704,7 @@ contains
     negf%nf(1:nn) = params%nf(1:nn)
     negf%eneconv = params%eneconv
     negf%spin = params%spin
-    negf%wght = params%wght
+    negf%kwght = params%wght
     negf%ikpoint = params%ikpoint
     negf%DorE = params%DorE
     negf%min_or_max = params%min_or_max
@@ -1045,7 +1045,7 @@ contains
     else
       read(101,*) tmp, negf%kbT
     endif
-    read(101,*)  tmp, negf%wght
+    read(101,*)  tmp, negf%kwght
     read(101,*)  tmp, negf%Np_n(1:2)
     read(101,*)  tmp, negf%Np_p(1:2)
     read(101,*)  tmp, negf%Np_real
@@ -1523,7 +1523,7 @@ contains
     type(Tnegf) :: negf
 
 
-    if ( allocated(negf%interArr) .or. negf%tDephasingBP) then
+    if ( allocated(negf%interactArray) .or. negf%tDephasingBP) then
        call compute_meir_wingreen(negf);
     else
        call compute_landauer(negf);

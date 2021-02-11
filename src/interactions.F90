@@ -27,7 +27,7 @@ module interactions
   use ln_precision, only : dp
   use mat_def, only : z_dns
   use ln_structure, only : TStruct_info
-
+  
   implicit none
   private
 
@@ -49,12 +49,14 @@ module interactions
 
     !> System partitioning (as in TNEGF)
     type(TStruct_info) :: struct
-
+    
   contains
 
     procedure, non_overridable :: set_scba_iter
     procedure(abst_add_sigma_r), deferred :: add_sigma_r
-    procedure(abst_get_sigma_n), deferred :: get_sigma_n
+    procedure(abst_get_sigma_n_blk), deferred, private :: get_sigma_n_blk
+    procedure(abst_get_sigma_n_mat), deferred, private :: get_sigma_n_mat
+    generic :: get_sigma_n => get_sigma_n_blk, get_sigma_n_mat
     procedure(abst_set_Gr), deferred :: set_Gr
     procedure(abst_set_Gn), deferred :: set_Gn
     procedure(abst_comp_Sigma_r), deferred :: compute_Sigma_r
@@ -88,7 +90,7 @@ module interactions
     !! @param [inout] blk_sigma_n: block dense sigma_n
     !! @param [in] ie: index of energy point
     !! @param [in] ie: index of k point
-    subroutine abst_get_sigma_n(this, blk_sigma_n, en_index, k_index, spin)
+    subroutine abst_get_sigma_n_blk(this, blk_sigma_n, en_index, k_index, spin)
       import :: interaction
       import :: z_dns
       class(interaction) :: this
@@ -96,7 +98,26 @@ module interactions
       integer, intent(in), optional :: en_index
       integer, intent(in), optional :: k_index
       integer, intent(in), optional :: spin
-    end subroutine abst_get_sigma_n
+    end subroutine abst_get_sigma_n_blk
+
+    !> Returns the lesser (n) Self Energy in block format
+    !! @param [in] this: calling instance
+    !! @param [in] struct: system structure
+    !! @param [inout] blk_sigma_n: block dense sigma_n
+    !! @param [in] ie: index of energy point
+    !! @param [in] ie: index of k point
+    subroutine abst_get_sigma_n_mat(this, sigma_n, ii, jj, en_index, k_index, spin)
+      import :: interaction
+      import :: z_dns
+      class(interaction) :: this
+      type(z_dns), intent(out) :: sigma_n
+      integer, intent(in) :: ii
+      integer, intent(in) :: jj 
+      integer, intent(in), optional :: en_index
+      integer, intent(in), optional :: k_index
+      integer, intent(in), optional :: spin
+    end subroutine abst_get_sigma_n_mat
+
 
     !> Give the Gr at given energy point to the interaction
     subroutine abst_set_Gr(this, Gr, en_index, k_index, spin)
@@ -150,26 +171,26 @@ module interactions
     this%scba_iter = scba_iter
   end subroutine set_scba_iter
 
-  function get_max_wq(interArr) result(maxwq)
-    type(TInteractionArray), intent(in) :: interArr(:)
+  function get_max_wq(interactArray) result(maxwq)
+    type(TInteractionArray), intent(in) :: interactArray(:)
     real(dp) :: maxwq
     integer :: ii
 
     maxwq = 0.0_dp
-    do ii = 1, size(interArr)
-      if (interArr(ii)%inter%wq > maxwq) then
-         maxwq = interArr(ii)%inter%wq
+    do ii = 1, size(interactArray)
+      if (interactArray(ii)%inter%wq > maxwq) then
+         maxwq = interactArray(ii)%inter%wq
       end if
     end do
   end function get_max_wq
 
-  function get_max_niter(interArr) result (max_niter)
-    type(TInteractionArray), intent(in) :: interArr(:)
+  function get_max_niter(interactArray) result (max_niter)
+    type(TInteractionArray), intent(in) :: interactArray(:)
     integer :: max_niter, ii
     max_niter = 0
-    do ii = 1, size(interArr)
-      if (interArr(ii)%inter%scba_niter > max_niter) then
-         max_niter = interArr(ii)%inter%scba_niter
+    do ii = 1, size(interactArray)
+      if (interactArray(ii)%inter%scba_niter > max_niter) then
+         max_niter = interactArray(ii)%inter%scba_niter
       end if
     end do
   end function get_max_niter
