@@ -32,6 +32,7 @@ module iterative
   use mpi_globals, only : id, numprocs, id0
   use outmatrix, only : outmat_c, inmat_c, direct_out_c, direct_in_c
   use clock
+  use ln_cache
   !use transform
 
   implicit none
@@ -142,7 +143,7 @@ CONTAINS
     call destroy_gsm(gsmr)
     call deallocate_gsm(gsmr)
 
-    call set_Gr(negf%interactArray, Gr, negf%iE)
+    call set_Gr(negf, Gr)
 
     call blk2csr(Gr,negf%str,negf%S,Grout)
 
@@ -264,7 +265,7 @@ CONTAINS
     call calculate_Gr_tridiag_blocks(ESH,rbl+1,nbl)
     call calculate_Gr_tridiag_blocks(ESH,rbl-1,1)
     !Passing Gr to interaction that builds Sigma_n
-    call set_Gr(negf%interactArray, Gr, negf%iE)
+    call set_Gr(negf, Gr)
 
     !Computes the columns of Gr for the contacts != reference
     ! Keep track of the calculated column indices in the array Gr_columns.
@@ -304,7 +305,7 @@ CONTAINS
 
 
     !Passing G^n to interaction that builds Sigma^n
-    call set_Gn(negf%interactArray, Gn, negf%iE)
+    call set_Gn(negf, Gn)
 
     call blk2csr(Gn,negf%str,negf%S,Glout)
 
@@ -399,7 +400,7 @@ CONTAINS
     call calculate_Gr_tridiag_blocks(ESH,2,nbl)
 
     !! Give Gr to interaction model if any
-    call set_Gr(negf%interactArray, Gr, negf%iE)
+    call set_Gr(negf, Gr)
 
     !! Never calculate outer blocks
     call allocate_blk_dns(Gn, nbl)
@@ -480,9 +481,9 @@ CONTAINS
     do ii = 1, nbl-1
       call prealloc_mult(ESH(ii,ii+1),Gn(ii+1,ii),work1)
       call prealloc_mult(ESH(ii+1,ii),Gn(ii,ii+1), minusone, work1)
-      curr_mat(ii) = trace(work1) 
+      curr_mat(ii) = trace(work1)
     end do
-    
+
     if (negf%tDestroyBlk) then
       call destroy_all_blk()
     end if
@@ -513,34 +514,143 @@ CONTAINS
     end if
   end subroutine add_sigma_r
 
+
+  !--------------------------------------------------------------------------
+  !> Store Gr
+  !>
+  subroutine cache_Gr(negf, Gr, en_index, k_index, spin)
+    class(TNegf) :: negf
+    type(z_dns), dimension(:,:), intent(in) :: Gr
+    integer, intent(in), optional :: en_index
+    integer, intent(in), optional :: k_index
+    integer, intent(in), optional :: spin
+
+    type(TMatLabel) :: label
+    integer :: ii, jj, nbl
+
+    label%kpoint = 0
+    label%energy_point = 0
+    label%spin = 0
+
+    if (present(k_index)) then
+      label%kpoint = k_index
+    end if
+    if (present(k_index)) then
+      label%energy_point = en_index
+    end if
+    if (present(spin)) then
+      label%spin = spin
+    end if
+
+    ! Just store the diagonal blocks for now
+    do ii = 1, size(Gr,1)
+      label%row_block = ii
+      label%col_block = ii
+      call negf%G_r%add(Gr(ii,ii), label)
+    end do
+
+  end subroutine cache_Gr
+
+  !--------------------------------------------------------------------------
+  !> store Gn
+  !>
+  subroutine cache_Gn(negf, Gn, en_index, k_index, spin)
+    class(TNegf) :: negf
+    type(z_dns), dimension(:,:), intent(in) :: Gn
+    integer, intent(in), optional :: en_index
+    integer, intent(in), optional :: k_index
+    integer, intent(in), optional :: spin
+
+    type(TMatLabel) :: label
+    integer :: ii, jj, nbl
+
+    label%kpoint = 0
+    label%energy_point = 0
+    label%spin = 0
+
+    if (present(k_index)) then
+      label%kpoint = k_index
+    end if
+    if (present(k_index)) then
+      label%energy_point = en_index
+    end if
+    if (present(spin)) then
+      label%spin = spin
+    end if
+
+    ! Just store the diagonal blocks for now
+    do ii = 1, size(Gn,1)
+      label%row_block = ii
+      label%col_block = ii
+      call negf%G_n%add(Gn(ii,ii), label)
+    end do
+
+  end subroutine cache_Gn
+
   ! Provides Gr to the interaction models.
   ! In some case the self/energies are computed
-  subroutine set_Gr(interactArray, Gr, iE)
-    type(TInteractionArray), allocatable :: interactArray(:)
-    type(z_DNS) :: Gr(:,:)
-    integer :: iE
+  subroutine set_Gr(negf, Gr)
+    type(TNegf) :: negf
+    type(z_DNS), intent(in) :: Gr(:,:)
 
-    integer :: kk
-    if (allocated(interactArray)) then
+    integer :: kk, iE, iK, iSpin
+    logical :: cached
+    iE=negf%iE
+    iK=negf%iKpoint
+    iSpin=negf%spin
+
+    if (allocated(negf%interactArray)) then
+      associate(interactArray=>negf%interactArray)
+      cached = .false.
       do kk = 1, size(interactArray)
-        call interactArray(kk)%inter%set_Gr(Gr, iE)
+        ! Set Gr to elastic interactions
+        if (interactArray(kk)%inter%wq == 0.0_dp) then
+          call interactArray(kk)%inter%set_Gr(Gr, iE, iK, iSpin)
+        else
+          ! cache Gr and pass the pointer
+          if (.not.cached) then
+            call cache_Gr(negf, Gr, iE, iK, iSpin)
+            cached = .true.
+          end if
+          call ElPhonInel_set_Gr(interactArray(kk)%inter, negf%G_r)
+        end if
       end do
+      end associate
     end if
+
   end subroutine set_Gr
 
   ! Provides Gn to the interaction models.
   ! In some case the self/energies are computed
-  subroutine set_Gn(interactArray, Gn, iE)
-    type(TInteractionArray), allocatable :: interactArray(:)
-    type(z_DNS) :: Gn(:,:)
-    integer :: iE
+  subroutine set_Gn(negf, Gn)
+    type(TNegf) :: negf
+    type(z_DNS), intent(in) :: Gn(:,:)
 
-    integer :: kk
-    if (allocated(interactArray)) then
+    integer :: kk, iE, iK, iSpin
+    logical :: cached
+    iE=negf%iE
+    iK=negf%iKpoint
+    iSpin=negf%spin
+
+    if (allocated(negf%interactArray)) then
+      associate(interactArray=>negf%interactArray)
+      cached = .false.
       do kk = 1, size(interactArray)
-        call interactArray(kk)%inter%set_Gn(Gn, iE)
+        ! Set Gr to elastic interactions
+        if (interactArray(kk)%inter%wq == 0.0_dp) then
+          call interactArray(kk)%inter%set_Gr(Gr, iE, iK, iSpin)
+        else
+          ! cache Gr and pass the pointer
+          if (.not.cached) then
+            call cache_Gn(negf, Gn, iE, iK, iSpin)
+            cached = .true.
+          end if
+          call ElPhonInel_set_Gn(interactArray(kk)%inter, negf%G_n)
+        end if
       end do
+      end associate
     end if
+
   end subroutine set_Gn
 
   !------------------------------------------------------------------------------!

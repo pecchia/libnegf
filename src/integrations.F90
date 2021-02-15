@@ -1487,25 +1487,25 @@ contains
     do j1 = 1,ncont
       frm(j1)=fermi(real(Ec), negf%cont(j1)%mu, negf%cont(j1)%kbT_t)
     enddo
-    
+
     ! ---------------------------------------------------------------------
     ! SCBA Iteration
     ! ---------------------------------------------------------------------
     call negf%scbaDriver%init(1.0e-7_dp, .false.)
     scba_niter = get_max_niter(negf%interactArray)
 
-    do scba_iter = 0, scba_niter
+    scba: do scba_iter = 0, scba_niter
       call write_info(negf%verbose, 'SCBA ITERATION', scba_iter)
 
       ! Loop over local k-points
-      do iK = 1, size(negf%local_k_index)
-        
+      kloop: do iK = 1, size(negf%local_k_index)
+
         negf%iKpoint = negf%local_k_index(iK)
         negf%kwght = negf%kweights(negf%iKpoint)
         print*,'Processing local k-point',negf%iKpoint
 
         !! Loop over energy points
-        do ii = 1, Nstep
+        enloop: do ii = 1, Nstep
 
           call write_point(negf%verbose, negf%en_grid(ii), size(negf%en_grid))
           if (negf%en_grid(ii)%cpu /= id) cycle
@@ -1521,7 +1521,7 @@ contains
           if (id0.and.negf%verbose.gt.VBT) call write_clock
 
           ! ---------------------------------------------------------------------
-          ! Compute block tri-diagonal Gr and Gn 
+          ! Compute block tri-diagonal Gr and Gn
           ! ---------------------------------------------------------------------
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Gn ')
           ! Avoids cleanup of Gn and ESH components for later use
@@ -1530,35 +1530,40 @@ contains
           if (id0.and.negf%verbose.gt.VBT) call write_clock
 
           ! ---------------------------------------------------------------------
-          ! Compute layer-to-layer currents and release memory 
+          ! Compute layer-to-layer currents and release memory
           ! ---------------------------------------------------------------------
           negf%tDestroyBlk = .true.
           call iterative_layer_current(negf,real(Ec),curr_mat)
 
-          negf%curr_mat(ii,:) = curr_mat(:) * negf%kwght 
+          negf%curr_mat(ii,:) = curr_mat(:) * negf%kwght
 
+        end do enloop
+
+      end do kloop
+
+      ! ---------------------------------------------------------------------
+      ! COMPUTE SELF-ENERGIES
+      ! ---------------------------------------------------------------------
+      if (allocated(negf%interactArray)) then
+        associate(interactArray=>negf%interactArray)
+        do ii = 1, size(interactArray)
+          call interactArray(ii)%inter%compute_Sigma_r()
+          call interactArray(ii)%inter%compute_Sigma_n()
         end do
+        end associate
+      end if
 
-      end do
+      call electron_current_meir_wingreen(negf)
 
-      ! ---------------------------------------------------------------------
-      ! COMPUTE SELF-ENRGIES
-      ! ---------------------------------------------------------------------
-      
-      !call self_energy( Gr, Sigma_r, Nq+1, Nq)
-      !call self_energy( Gr, Sigma_r, imag*0.5_dp,-imag*0.5_dp)
-      !call self_energy( Gn, Sigma_n, Nq,Nq+1)
-
-
-
-      call negf%scbaDriver%check_Mat_convergence(Gn)
+      !Check SCBA convergence on layer currents
+      call negf%scbaDriver%check_J_convergence(negf%currents)
       call negf%scbaDriver%destroy()
 
       do icont=1,ncont
         call destroy(Tlc(icont),Tcl(icont),SelfEneR(icont),GS(icont))
       end do
 
-    end do
+    end do scba
 
     call log_deallocate(curr_mat)
     negf%refcont = ref_bk
