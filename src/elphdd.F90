@@ -24,6 +24,7 @@ module elphdd
 
   use ln_precision, only : dp
   use interactions, only : interaction
+  use ln_elastic, only : elastic
   use ln_allocation, only : log_allocate, log_deallocate
   use ln_structure, only : TStruct_info
   use mat_def, only : z_dns, create
@@ -33,7 +34,7 @@ module elphdd
 
   public :: ElPhonDephD, ElPhonDephD_create
 
-  type, extends(interaction) :: ElPhonDephD
+  type, extends(elastic) :: ElPhonDephD
 
     !> Coupling squared per each orbital , dimension energy^2
     real(dp), allocatable, dimension(:) :: coupling
@@ -205,7 +206,7 @@ contains
 
   end subroutine set_Gn
 
-  !>  Compute Sigma_r : necessary for inelastic
+  !>  Compute Sigma_r : dummy 
   subroutine compute_Sigma_r(this, en_index, k_index, spin)
     class(ElPhonDephD) :: this
     integer, intent(in), optional  :: en_index
@@ -213,7 +214,7 @@ contains
     integer, intent(in), optional  :: spin
   end subroutine compute_Sigma_r
 
-  !>  Compute Sigma_n : necessary for inelastic
+  !>  Compute Sigma_n : dummy
   subroutine compute_Sigma_n(this, en_index, k_index, spin)
     class(ElPhonDephD) :: this
     integer, intent(in), optional  :: en_index

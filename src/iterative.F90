@@ -33,6 +33,8 @@ module iterative
   use outmatrix, only : outmat_c, inmat_c, direct_out_c, direct_in_c
   use clock
   use ln_cache
+  use ln_elastic
+  use ln_inelastic
   !use transform
 
   implicit none
@@ -601,18 +603,19 @@ CONTAINS
 
     if (allocated(negf%interactArray)) then
       associate(interactArray=>negf%interactArray)
-      cached = .false.
       do kk = 1, size(interactArray)
-        ! Set Gr to elastic interactions
         if (interactArray(kk)%inter%wq == 0.0_dp) then
+          ! elastic case    
           call interactArray(kk)%inter%set_Gr(Gr, iE, iK, iSpin)
         else
           ! cache Gr and pass the pointer
-          if (.not.cached) then
+          if (kk == 1) then
             call cache_Gr(negf, Gr, iE, iK, iSpin)
-            cached = .true.
           end if
-          call ElPhonInel_set_Gr(interactArray(kk)%inter, negf%G_r)
+          select type(pInter => interactArray(kk)%inter)
+          class is (inelastic)
+             call pInter%set_Gr_pointer(negf%G_r)
+          end select   
         end if
       end do
       end associate
@@ -638,14 +641,16 @@ CONTAINS
       do kk = 1, size(interactArray)
         ! Set Gr to elastic interactions
         if (interactArray(kk)%inter%wq == 0.0_dp) then
-          call interactArray(kk)%inter%set_Gr(Gr, iE, iK, iSpin)
+          call interactArray(kk)%inter%set_Gn(Gn, iE, iK, iSpin)
         else
-          ! cache Gr and pass the pointer
-          if (.not.cached) then
+          ! cache Gn and pass the pointer
+          if (kk == 1) then
             call cache_Gn(negf, Gn, iE, iK, iSpin)
-            cached = .true.
           end if
-          call ElPhonInel_set_Gn(interactArray(kk)%inter, negf%G_n)
+          select type(pInter => interactArray(kk)%inter)
+          class is (inelastic)
+             call pInter%set_Gn_pointer(negf%G_n)
+          end select   
         end if
       end do
       end associate

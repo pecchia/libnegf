@@ -23,7 +23,8 @@
 module elphdb
 
   use ln_precision, only : dp
-  use interactions, only : interaction
+  !use interactions, only : interaction
+  use ln_elastic, only : elastic
   use ln_allocation, only : log_allocate, log_deallocate
   use ln_structure, only : TStruct_info
   use mat_def, only : z_dns, create
@@ -33,7 +34,7 @@ module elphdb
 
   public :: ElPhonDephB, ElPhonDephB_create
 
-  type, extends(interaction) :: ElPhonDephB
+  type, extends(elastic) :: ElPhonDephB
 
     private
     !> Electron-phonon coupling per each atomic block, dimension energy

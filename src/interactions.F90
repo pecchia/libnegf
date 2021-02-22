@@ -144,7 +144,6 @@ module interactions
     !>  Compute Sigma_n : necessary for inelastic
     subroutine abst_comp_Sigma_n(this, en_index, k_index, spin)
       import :: interaction
-      import :: z_dns
       class(interaction) :: this
       integer, intent(in), optional  :: en_index
       integer, intent(in), optional  :: k_index
@@ -154,7 +153,6 @@ module interactions
     !>  Compute Sigma_r : necessary for inelastic
     subroutine abst_comp_Sigma_r(this, en_index, k_index, spin)
       import :: interaction
-      import :: z_dns
       class(interaction) :: this
       integer, intent(in), optional  :: en_index
       integer, intent(in), optional  :: k_index

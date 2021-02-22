@@ -38,6 +38,7 @@ module integrations
  use clock
  use energy_mesh
  use interactions
+ use elphinel
  implicit none
 
  private
@@ -1544,14 +1545,7 @@ contains
       ! ---------------------------------------------------------------------
       ! COMPUTE SELF-ENERGIES
       ! ---------------------------------------------------------------------
-      if (allocated(negf%interactArray)) then
-        associate(interactArray=>negf%interactArray)
-        do ii = 1, size(interactArray)
-          call interactArray(ii)%inter%compute_Sigma_r()
-          call interactArray(ii)%inter%compute_Sigma_n()
-        end do
-        end associate
-      end if
+      call compute_Sigmas(negf)
 
       call electron_current_meir_wingreen(negf)
 
@@ -1569,6 +1563,22 @@ contains
     negf%refcont = ref_bk
 
   end subroutine layer_current
+      
+  subroutine compute_sigmas(negf)
+    type(TNegf) :: negf   
+
+    integer :: ii
+
+    if (allocated(negf%interactArray)) then
+      associate(intArray => negf%interactArray)    
+      do ii = 1, size(intArray)
+          call intArray(ii)%inter%compute_Sigma_r()
+          call intArray(ii)%inter%compute_Sigma_n()
+      end do
+      end associate   
+    end if
+  end subroutine compute_sigmas
+
   !---------------------------------------------------------------------------
   !>
   !  Calculate the equilibrium Retarded Green's function (extended diagonal)

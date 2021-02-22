@@ -25,22 +25,21 @@ module elphinel
 
   use ln_precision, only : dp
   use interactions, only : interaction
+  use ln_inelastic, only : inelastic
   use ln_allocation, only : log_allocate, log_deallocate
   use ln_structure, only : TStruct_info
   use ln_structure, only : TBasisCenters, create_TBasis, destroy_TBasis
   use mat_def, only : z_csr, z_dns, create, destroy
-  use ln_cache
   use distributions, only : bose
+  use ln_cache
   use iso_c_binding
 
   implicit none
   private
 
   public :: ElPhonInel, ElPhonInel_create, ElPhonInel_reinit
-  public :: ElPhonInel_set_Gr
-  !public :: set_Gn_pointer
 
-  type, extends(interaction) :: ElPhonInel
+  type, extends(inelastic) :: ElPhonInel
     private
     !> communicator of the cartesian grid
     integer(c_int) :: cart_comm
@@ -77,12 +76,6 @@ module elphinel
     !> Matrix KK
     real(dp), allocatable :: Kmat(:,:,:)
 
-    !> sigma_r and sigma_n
-    class(TMatrixCache), allocatable :: sigma_r
-    class(TMatrixCache), allocatable :: sigma_n
-    !> Gr and Gn are pointer alias stored in negf.
-    class(TMatrixCache), pointer :: G_r => null()
-    class(TMatrixCache), pointer :: G_n => null()
 
   contains
 
@@ -375,21 +368,6 @@ contains
     integer, intent(in), optional  :: spin
   end subroutine set_Gn
 
-  !> Set the Gr pointe
-  subroutine ElPhonInel_set_Gr(this, Gr)
-    type(ElPhonInel), intent(inout) :: this
-    class(TMatrixCache), pointer :: Gr
-
-    this%G_r => Gr
-  end subroutine ElPhonInel_set_Gr
-
-  !> Set the Gn pointer
-  subroutine ElPhonInel_set_Gn(this, Gn)
-    type(ElPhonInel) :: this
-    class(TMatrixCache), pointer :: Gn
-
-    this%G_n => Gn
-  end subroutine ElPhonInel_set_Gn
 
   !--------------------------------------------------------------------------
   !> Give the Gn at given energy point to the interaction

@@ -27,6 +27,8 @@ set(sources-fpp
   population.F90
   energy_mesh.F90
   interactions.F90
+  ln_elastic.F90
+  ln_inelastic.F90
   elphdd.F90
   elphdb.F90
   elphds.F90

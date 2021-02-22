@@ -237,9 +237,10 @@ module lib_param
 
     ! Work variable: surface green cache.
     class(TMatrixCache), allocatable :: surface_green_cache
-    class(TMatrixCache), allocatable :: G_r
-    class(TMatrixCache), allocatable :: G_n
     class(TMatrixCache), allocatable :: ESH
+    ! These are pointers so they can be passed to inelastic 
+    class(TMatrixCache), pointer :: G_r
+    class(TMatrixCache), pointer :: G_n
 
     contains
 

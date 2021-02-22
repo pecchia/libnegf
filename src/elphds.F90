@@ -24,6 +24,7 @@ module elphds
 
   use ln_precision, only : dp
   use interactions, only : interaction
+  use ln_elastic, only : elastic
   use ln_allocation, only : log_allocate, log_deallocate
   use ln_structure, only : TStruct_info
   use mat_def, only : z_csr, z_dns, create, destroy
@@ -35,7 +36,7 @@ module elphds
 
   public :: ElPhonDephS, ElPhonDephS_create
 
-  type, extends(interaction) :: ElPhonDephS
+  type, extends(elastic) :: ElPhonDephS
 
     private
     !> Electron-phonon Coupling for each atomic mode in CSR form, dimension energy
