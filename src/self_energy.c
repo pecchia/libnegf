@@ -58,9 +58,9 @@ int self_energy(
   // fac2 * G(E+wq)
   double fac2,
   // Array of z coordinates on the grid indexed as the matrix
-  int *iz;
+  int *iz,
   // Pretubulated array KK(|zi-zj|, iQ, iK)
-  double *KK,
+  double *KK
 )
 {
   int myid, size;

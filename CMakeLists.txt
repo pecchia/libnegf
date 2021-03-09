@@ -34,6 +34,9 @@ option(BUILD_TESTING "Whether the tests should be built" FALSE)
 option(FORCE_MPIFX_DOWNLOAD
   "Force mpifx download from repository (do not search for installed package) " FALSE)
 
+message(STATUS "libNEGF Fortran compiler: " ${CMAKE_Fortran_COMPILER})
+message(STATUS "libNEGF C compiler: " ${CMAKE_C_COMPILER})
+
 if(LAPACK_LIBRARIES AND LAPACK_LIBRARY_DIRS)
   message(STATUS "libNEGF BLAS: " ${BLAS_LIBRARIES})
   message(STATUS "libNEGF LAPACK: " ${LAPACK_LIBRARIES})
