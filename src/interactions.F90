@@ -19,7 +19,7 @@
 !!--------------------------------------------------------------------------!
 
 !> The module implements an abstract class to interface different
-!! many body interactions.
+!! many body TInteractions.
 
 module interactions
 
@@ -31,12 +31,12 @@ module interactions
   implicit none
   private
 
-  public :: interaction
+  public :: TInteraction
   public :: TInteractionArray
   public :: get_max_wq
   public :: get_max_niter
 
-  type, abstract :: interaction
+  type, abstract :: TInteraction
     !> Textual descriptor for output
     character(len=LST) :: descriptor
     !> Maximum number of SCBA iterations
@@ -62,12 +62,12 @@ module interactions
     procedure(abst_comp_Sigma_r), deferred :: compute_Sigma_r
     procedure(abst_comp_Sigma_n), deferred :: compute_Sigma_n
 
-  end type Interaction
+  end type TInteraction
 
   !-----------------------------------------------------------------------------
   ! derived type to create array of pointers to objects
   type TInteractionArray
-    class(Interaction), allocatable :: inter
+    class(TInteraction), allocatable :: inter
   end type TInteractionArray
 
   abstract interface
@@ -75,9 +75,9 @@ module interactions
     !> This interface should append
     !! the retarded self energy to ESH
     subroutine abst_add_sigma_r(this, esh, en_index, k_index, spin)
-      import :: interaction
+      import :: TInteraction
       import :: z_dns
-      class(interaction) :: this
+      class(TInteraction) :: this
       type(z_dns), dimension(:,:), intent(inout) :: esh
       integer, intent(in), optional  :: en_index
       integer, intent(in), optional  :: k_index
@@ -91,9 +91,9 @@ module interactions
     !! @param [in] ie: index of energy point
     !! @param [in] ie: index of k point
     subroutine abst_get_sigma_n_blk(this, blk_sigma_n, en_index, k_index, spin)
-      import :: interaction
+      import :: TInteraction
       import :: z_dns
-      class(interaction) :: this
+      class(TInteraction) :: this
       type(z_dns), dimension(:,:), intent(inout) :: blk_sigma_n
       integer, intent(in), optional :: en_index
       integer, intent(in), optional :: k_index
@@ -107,9 +107,9 @@ module interactions
     !! @param [in] ie: index of energy point
     !! @param [in] ie: index of k point
     subroutine abst_get_sigma_n_mat(this, sigma_n, ii, jj, en_index, k_index, spin)
-      import :: interaction
+      import :: TInteraction
       import :: z_dns
-      class(interaction) :: this
+      class(TInteraction) :: this
       type(z_dns), intent(out) :: sigma_n
       integer, intent(in) :: ii
       integer, intent(in) :: jj 
@@ -119,22 +119,22 @@ module interactions
     end subroutine abst_get_sigma_n_mat
 
 
-    !> Give the Gr at given energy point to the interaction
+    !> Give the Gr at given energy point to the TInteraction
     subroutine abst_set_Gr(this, Gr, en_index, k_index, spin)
-      import :: interaction
+      import :: TInteraction
       import :: z_dns
-      class(interaction) :: this
+      class(TInteraction) :: this
       type(z_dns), dimension(:,:), intent(in) :: Gr
       integer, intent(in), optional  :: en_index
       integer, intent(in), optional  :: k_index
       integer, intent(in), optional  :: spin
     end subroutine abst_set_Gr
 
-    !> Give the Gn at given energy point to the interaction
+    !> Give the Gn at given energy point to the TInteraction
     subroutine abst_set_Gn(this, Gn, en_index, k_index, spin)
-      import :: interaction
+      import :: TInteraction
       import :: z_dns
-      class(interaction) :: this
+      class(TInteraction) :: this
       type(z_dns), dimension(:,:), intent(in) :: Gn
       integer, intent(in), optional  :: en_index
       integer, intent(in), optional  :: k_index
@@ -143,8 +143,8 @@ module interactions
 
     !>  Compute Sigma_n : necessary for inelastic
     subroutine abst_comp_Sigma_n(this, en_index, k_index, spin)
-      import :: interaction
-      class(interaction) :: this
+      import :: TInteraction
+      class(TInteraction) :: this
       integer, intent(in), optional  :: en_index
       integer, intent(in), optional  :: k_index
       integer, intent(in), optional  :: spin
@@ -152,8 +152,8 @@ module interactions
 
     !>  Compute Sigma_r : necessary for inelastic
     subroutine abst_comp_Sigma_r(this, en_index, k_index, spin)
-      import :: interaction
-      class(interaction) :: this
+      import :: TInteraction
+      class(TInteraction) :: this
       integer, intent(in), optional  :: en_index
       integer, intent(in), optional  :: k_index
       integer, intent(in), optional  :: spin
@@ -164,7 +164,7 @@ module interactions
   contains
 
   subroutine set_scba_iter(this, scba_iter)
-    class(interaction) :: this
+    class(TInteraction) :: this
     integer, intent(in) :: scba_iter
     this%scba_iter = scba_iter
   end subroutine set_scba_iter

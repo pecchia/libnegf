@@ -3,9 +3,9 @@ module ln_inelastic
   use ln_cache
   implicit none
 
-  public :: inelastic
+  public :: TInelastic
 
-  type, abstract, extends(interaction) :: inelastic
+  type, abstract, extends(TInteraction) :: TInelastic
 
     !> sigma_r and sigma_n
     class(TMatrixCache), allocatable :: sigma_r
@@ -14,26 +14,26 @@ module ln_inelastic
     class(TMatrixCache), pointer :: G_r => null()
     class(TMatrixCache), pointer :: G_n => null()
 
-    contains      
+    contains
 
     procedure, non_overridable :: set_Gr_pointer
     procedure, non_overridable :: set_Gn_pointer
 
-  end type inelastic
+  end type TInelastic
 
   contains
 
 
   !> Set the Gr pointe
   subroutine set_Gr_pointer(this, Gr)
-    class(inelastic), intent(inout) :: this
+    class(TInelastic), intent(inout) :: this
     class(TMatrixCache), pointer :: Gr
     this%G_r => Gr
   end subroutine set_Gr_pointer
 
   !> Set the Gn pointer
   subroutine set_Gn_pointer(this, Gn)
-    class(inelastic), intent(inout) :: this
+    class(TInelastic), intent(inout) :: this
     class(TMatrixCache), pointer :: Gn
     this%G_n => Gn
   end subroutine set_Gn_pointer

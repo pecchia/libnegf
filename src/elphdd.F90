@@ -23,8 +23,8 @@
 module elphdd
 
   use ln_precision, only : dp
-  use interactions, only : interaction
-  use ln_elastic, only : elastic
+  use interactions, only : TInteraction
+  use ln_elastic, only : TElastic
   use ln_allocation, only : log_allocate, log_deallocate
   use ln_structure, only : TStruct_info
   use mat_def, only : z_dns, create
@@ -33,8 +33,9 @@ module elphdd
   private
 
   public :: ElPhonDephD, ElPhonDephD_create
+  public :: ElPhonDephD_init
 
-  type, extends(elastic) :: ElPhonDephD
+  type, extends(TElastic) :: ElPhonDephD
 
     !> Coupling squared per each orbital , dimension energy^2
     real(dp), allocatable, dimension(:) :: coupling
@@ -59,15 +60,18 @@ module elphdd
 
 contains
 
+  subroutine ElPhonDephD_create(this)
+    class(TInteraction), allocatable :: this
+    allocate(ElPhonDephD::this)
+  end subroutine ElPhonDephD_create
   !>
   ! Factory for el-ph dephasing diagonal model
   ! @param struct : contact/device partitioning infos
   ! @param coupling: coupling (energy units)
   ! @param niter: fixed number of scba iterations
   ! @param tol: scba tolerance
-  subroutine ElPhonDephD_create(this, struct, coupling, niter)
-
-    type(ElPhonDephD), intent(inout) :: this
+  subroutine ElPhonDephD_init(this, struct, coupling, niter)
+    type(ElPhonDephD) :: this
     type(TStruct_info), intent(in) :: struct
     real(dp), dimension(:), intent(in) :: coupling
     integer, intent(in) :: niter
@@ -87,7 +91,7 @@ contains
                        !treat them all together)
     this%wq = 0.0_dp   ! Zero energy mode
 
-  end subroutine ElPhonDephD_create
+  end subroutine ElPhonDephD_init
 
 
   !> This interface should append
@@ -143,7 +147,7 @@ contains
     enddo
 
   end subroutine get_sigma_n_blk
-  
+
   subroutine get_sigma_n_mat(this, sigma_n, ii, jj, en_index, k_index, spin)
     class(ElPhonDephD) :: this
     type(z_dns), intent(out) :: sigma_n
@@ -206,7 +210,7 @@ contains
 
   end subroutine set_Gn
 
-  !>  Compute Sigma_r : dummy 
+  !>  Compute Sigma_r : dummy
   subroutine compute_Sigma_r(this, en_index, k_index, spin)
     class(ElPhonDephD) :: this
     integer, intent(in), optional  :: en_index

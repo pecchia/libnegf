@@ -24,8 +24,8 @@
 module elphinel
 
   use ln_precision, only : dp
-  use interactions, only : interaction
-  use ln_inelastic, only : inelastic
+  use interactions, only : TInteraction
+  use ln_inelastic, only : TInelastic
   use ln_allocation, only : log_allocate, log_deallocate
   use ln_structure, only : TStruct_info
   use ln_structure, only : TBasisCenters, create_TBasis, destroy_TBasis
@@ -37,9 +37,10 @@ module elphinel
   implicit none
   private
 
-  public :: ElPhonInel, ElPhonInel_create, ElPhonInel_reinit
+  public :: ElPhonInel, ElPhonInel_create
+  public :: ElPhonInel_init, ElPhonInel_reinit
 
-  type, extends(inelastic) :: ElPhonInel
+  type, extends(TInelastic) :: ElPhonInel
     private
     !> communicator of the cartesian grid
     integer(c_int) :: cart_comm
@@ -136,15 +137,19 @@ module elphinel
 
 contains
 
+  subroutine ElPhonInel_create(this)
+    class(TInteraction), allocatable :: this
+    allocate(ElPhonInel::this)
+  end subroutine ElPhonInel_create
+
   !>
   ! Factory for el-ph inelastic model based on polar-optical modes
   ! @param struct : contact/device partitioning infos
   ! @param coupling: coupling (energy units)
   ! @param wq: phonon frequence
   ! @param niter: fixed number of scba iterations
-  subroutine ElPhonInel_create(this, comm, struct, basis, coupling, wq, Temp, niter)
-
-    type(ElPhonInel), intent(inout) :: this
+  subroutine ElPhonInel_init(this, comm, struct, basis, coupling, wq, Temp, niter)
+    type(ElPhonInel) :: this
     integer, intent(in) :: comm
     type(TStruct_Info), intent(in) :: struct
     type(TBasisCenters), intent(in) :: basis
@@ -169,7 +174,7 @@ contains
     if (allocated(this%sigma_n)) call this%sigma_n%destroy()
     this%sigma_n = TMatrixCacheMem()
 
-  end subroutine ElPhonInel_create
+  end subroutine ElPhonInel_init
 
   !--------------------------------------------------------------------------
   ! This function should be called before the SCBA loop
@@ -437,8 +442,8 @@ contains
       fac_min = this%Nq + 1
       fac_plus = this%Nq
 
-      err = self_energy(this%cart_comm, Np, Np, NK, NE, NKloc, NEloc, iEshift, pGG, pSigma, &
-            & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, fac_min, fac_plus, iz, this%Kmat)
+      !err = self_energy(this%cart_comm, Np, Np, NK, NE, NKloc, NEloc, iEshift, pGG, pSigma, &
+      !      & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, fac_min, fac_plus, iz, this%Kmat)
 
       ! setup the array of pointers to G_n
       do iK = 1, NKloc
@@ -453,8 +458,8 @@ contains
       fac_min = (0.0_dp, 0.5_dp)
       fac_plus = (0.0_dp, -0.5_dp)
 
-      err = self_energy(this%cart_comm, Np, Np, NK, NE, NKloc, NEloc, iEshift, pGG, pSigma, &
-            & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, fac_min, fac_plus, iz, this%Kmat)
+      !err = self_energy(this%cart_comm, Np, Np, NK, NE, NKloc, NEloc, iEshift, pGG, pSigma, &
+      !      & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, fac_min, fac_plus, iz, this%Kmat)
 
       call log_deallocate(sbuff1)
       call log_deallocate(rbuff1)
@@ -540,8 +545,8 @@ contains
       fac_min = this%Nq
       fac_plus = this%Nq + 1
 
-      err = self_energy(this%cart_comm, Np, Np, NK, NE, NKloc, NEloc, iEshift, pGG, pSigma, &
-            & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, fac_min, fac_plus, iz, this%Kmat)
+      !err = self_energy(this%cart_comm, Np, Np, NK, NE, NKloc, NEloc, iEshift, pGG, pSigma, &
+      !      & sbuff1, sbuff2, rbuff1, rbuff2, rbuffH, sbuffH, fac_min, fac_plus, iz, this%Kmat)
 
       call log_deallocate(sbuff1)
       call log_deallocate(rbuff1)

@@ -605,7 +605,7 @@ CONTAINS
       associate(interactArray=>negf%interactArray)
       do kk = 1, size(interactArray)
         if (interactArray(kk)%inter%wq == 0.0_dp) then
-          ! elastic case    
+          ! elastic case
           call interactArray(kk)%inter%set_Gr(Gr, iE, iK, iSpin)
         else
           ! cache Gr and pass the pointer
@@ -613,9 +613,9 @@ CONTAINS
             call cache_Gr(negf, Gr, iE, iK, iSpin)
           end if
           select type(pInter => interactArray(kk)%inter)
-          class is (inelastic)
+          class is (TInelastic)
              call pInter%set_Gr_pointer(negf%G_r)
-          end select   
+          end select
         end if
       end do
       end associate
@@ -648,9 +648,9 @@ CONTAINS
             call cache_Gn(negf, Gn, iE, iK, iSpin)
           end if
           select type(pInter => interactArray(kk)%inter)
-          class is (inelastic)
+          class is (TInelastic)
              call pInter%set_Gn_pointer(negf%G_n)
-          end select   
+          end select
         end if
       end do
       end associate

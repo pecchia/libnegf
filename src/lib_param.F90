@@ -24,15 +24,16 @@ module lib_param
   use ln_precision, only : dp
   use globals
   use mat_def
-  use ln_structure, only : TStruct_info, print_Tstruct
+  use ln_structure, only : TStruct_info, TBasisCenters, TNeighbourMap, print_Tstruct
   use input_output
   use elph, only : Telph
   use phph
   use energy_mesh, only : mesh
-  use interactions, only : Interaction, TInteractionArray
-  use elphdd, only : ElPhonDephD, ElPhonDephD_create
-  use elphdb, only : ElPhonDephB, ElPhonDephB_create
-  use elphds, only : ElPhonDephS, ElPhonDephS_create
+  use interactions, only : TInteraction, TInteractionArray
+  use elphdd, only : ElPhonDephD, ElPhonDephD_create, ElPhonDephD_init
+  use elphdb, only : ElPhonDephB, ElPhonDephB_create, ElPhonDephB_init
+  use elphds, only : ElPhonDephS, ElPhonDephS_create, ElPhonDephS_init
+  use elphinel, only : ElPhonInel, ElPhonInel_create, ElPhonInel_init
   use scba
   use ln_cache
 #:if defined("MPI")
@@ -47,6 +48,7 @@ module lib_param
   public :: set_elph_dephasing
   public :: set_elph_block_dephasing
   public :: set_elph_s_dephasing
+  public :: set_elph_inelastic
   public :: set_phph
   integer, public, parameter :: MAXNCONT=10
 
@@ -189,12 +191,14 @@ module lib_param
     logical    :: intDM           ! tells DM is internally allocated
 
     type(TStruct_Info) :: str     ! system structure
+    type(TBasisCenters) :: basis  ! local basis centers
+    type(TNeighbourMap), dimension(:), allocatable :: neighbour_map
     integer :: iE                 ! Currently processed En point (index)
     complex(dp) :: Epnt           ! Currently processed En point (value)
-    real(dp) :: kwght             ! currently processed k-point weight 
+    real(dp) :: kwght             ! currently processed k-point weight
     integer :: iKpoint            ! currently processed k-point (index)
 
-    ! Energy grid information 
+    ! Energy grid information
     type(TEnGrid), dimension(:), allocatable :: en_grid
     integer :: local_en_points    ! Local number of energy points
 
@@ -203,11 +207,11 @@ module lib_param
     real(dp), allocatable, dimension(:) :: kweights
     ! Array of local k-point indices
     integer, allocatable, dimension(:) :: local_k_index
-    
+
     type(mesh) :: emesh           ! energy mesh for adaptive Simpson
     real(dp) :: int_acc           ! adaptive integration accuracy
-   
-    
+
+
     type(Telph) :: elph           ! electron-phonon data
     type(Tphph) :: phph           ! phonon-phonon data
 
@@ -223,13 +227,12 @@ module lib_param
     real(dp), dimension(:), allocatable :: currents
 
     ! These variables need to be done to clean up
-    logical :: tDephasingVE = .false.
-    logical :: tDephasingBP = .false.
     logical :: tOrthonormal = .false.
     logical :: tOrthonormalDevice = .false.
     integer :: numStates = 0
     logical :: tDestroyBlk = .true.
     ! Buttiker Probes dephasing
+    logical :: tDephasingBP = .false.
     type(Tdeph_bp) :: bp_deph
 
     ! internal use only
@@ -238,9 +241,9 @@ module lib_param
     ! Work variable: surface green cache.
     class(TMatrixCache), allocatable :: surface_green_cache
     class(TMatrixCache), allocatable :: ESH
-    ! These are pointers so they can be passed to inelastic 
-    class(TMatrixCache), pointer :: G_r
-    class(TMatrixCache), pointer :: G_n
+    ! These are pointers so they can be passed to inelastic
+    class(TMatrixCache), pointer :: G_r => null()
+    class(TMatrixCache), pointer :: G_n => null()
 
     contains
 
@@ -256,7 +259,7 @@ contains
 
   !> Set buttiker probe dephasing
   subroutine set_bp_dephasing(negf, coupling)
-    type(Tnegf) :: negf
+    type(Tnegf), intent(inout) :: negf
     real(dp),  dimension(:), intent(in) :: coupling
 
     if (.not.allocated(negf%bp_deph%coupling)) then
@@ -266,59 +269,95 @@ contains
 
   end subroutine set_bp_dephasing
 
+
   !> Set values for the local electron phonon dephasing model
   !! (elastic scattering only)
   subroutine set_elph_dephasing(negf, coupling, niter)
-    type(Tnegf) :: negf
+    type(Tnegf), intent(inout) :: negf
     real(dp),  dimension(:), allocatable, intent(in) :: coupling
     integer, intent(in) :: niter
 
-    type(ElPhonDephD) :: elphdd_tmp
     integer :: ii
-    call elphondephd_create(elphdd_tmp, negf%str, coupling, niter)
     ii = negf%get_empty_slot()
     if (ii > size(negf%interactArray)) then
        stop 'ERROR: empty slot not found'
     end if
-    allocate(negf%interactArray(ii)%inter, source=elphdd_tmp)
-
+    call elphondephd_create(negf%interactArray(ii)%inter)
+    select type(pInter => negf%interactArray(ii)%inter)
+    type is(ElPhonDephD)
+      call elphondephd_init(pInter, negf%str, coupling, niter)
+    class default
+      stop 'ERROR: error of type downcast to ElPhonDephD'
+    end select
   end subroutine set_elph_dephasing
 
   !> Set values for the semi-local electron phonon dephasing model
   !! (elastic scattering only)
   subroutine set_elph_block_dephasing(negf, coupling, orbsperatom, niter)
-    type(Tnegf) :: negf
+    type(Tnegf), intent(inout) :: negf
     real(dp),  dimension(:), allocatable, intent(in) :: coupling
     integer,  dimension(:), allocatable, intent(in) :: orbsperatom
     integer, intent(in) :: niter
 
-    type(ElPhonDephB) :: elphdb_tmp
     integer :: ii
-    call elphondephb_create(elphdb_tmp, negf%str, coupling, orbsperatom, niter)
     ii = negf%get_empty_slot()
     if (ii > size(negf%interactArray)) then
        stop 'ERROR: empty slot not found'
     end if
-    allocate(negf%interactArray(ii)%inter, source=elphdb_tmp)
+    call elphondephb_create(negf%interactArray(ii)%inter)
+    select type(pInter => negf%interactArray(ii)%inter)
+    type is(ElPhonDephB)
+      call elphondephb_init(pInter, negf%str, coupling, orbsperatom, niter)
+    class default
+      stop 'ERROR: error of type downcast to ElPhonDephB'
+    end select
   end subroutine set_elph_block_dephasing
 
   !> Set values for the semi-local electron phonon dephasing model
   !! (elastic scattering only)
   subroutine set_elph_s_dephasing(negf, coupling, orbsperatom, niter)
-    type(Tnegf) :: negf
+    type(Tnegf), intent(inout) :: negf
     real(dp),  dimension(:), allocatable, intent(in) :: coupling
     integer,  dimension(:), allocatable, intent(in) :: orbsperatom
     integer, intent(in) :: niter
 
-    type(ElPhonDephS) :: elphds_tmp
     integer :: ii
-    call elphondephs_create(elphds_tmp, negf%str, coupling, orbsperatom, negf%S, niter)
     ii = negf%get_empty_slot()
     if (ii > size(negf%interactArray)) then
        stop 'ERROR: empty slot not found'
     end if
-    allocate(negf%interactArray(ii)%inter, source=elphds_tmp)
+    call elphondephs_create(negf%interactArray(ii)%inter)
+    select type(pInter => negf%interactArray(ii)%inter)
+    type is(ElPhonDephS)
+      call elphondephs_init(pInter, negf%str, coupling, orbsperatom, negf%S, niter)
+    class default
+      stop 'ERROR: error of type downcast to ElPhonDephS'
+    end select
   end subroutine set_elph_s_dephasing
+
+  subroutine set_elph_inelastic(negf, coupling, wq, Temp, niter)
+    type(Tnegf), intent(inout) :: negf
+    real(dp),  dimension(:), allocatable, intent(in) :: coupling
+    real(dp), intent(in) :: wq
+    real(dp), intent(in) :: Temp
+    integer, intent(in) :: niter
+
+    integer :: ii
+    ii = negf%get_empty_slot()
+    if (ii > size(negf%interactArray)) then
+       stop 'ERROR: empty slot not found'
+    end if
+
+    call elphonInel_create(negf%interactArray(ii)%inter)
+    select type(pInter => negf%interactArray(ii)%inter)
+    type is(ElPhonInel)
+      call elphoninel_init(pInter, negf%cartComm%id, negf%str, negf%basis, coupling, &
+          &  wq, Temp, niter)
+    class default
+      stop 'ERROR: error of type downcast to ElPhonInel'
+    end select
+
+  end subroutine set_elph_inelastic
 
   !> create the array of interactions
   subroutine create_interactions(this, nInteractions)

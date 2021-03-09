@@ -52,6 +52,7 @@ module libnegf
  public :: Tnegf
  public :: set_bp_dephasing
  public :: set_elph_dephasing, set_elph_block_dephasing, set_elph_s_dephasing
+ public :: set_elph_inelastic
  public :: interaction_models
  public :: set_clock, write_clock
  public :: writeMemInfo, writePeakInfo
@@ -68,7 +69,7 @@ module libnegf
  !Input and work flow procedures
  public :: lnParams
  public :: init_negf, destroy_negf
- public :: init_contacts, init_structure
+ public :: init_contacts, init_structure, init_basis
  public :: get_params, set_params, set_scratch, set_outpath, create_scratch
  public :: init_ldos, set_ldos_intervals, set_ldos_indexes, set_tun_indexes
 
@@ -101,6 +102,7 @@ module libnegf
  public :: compute_dephasing_transmission ! high-level wrapping routines
                                           ! Extract HM and SM
                                           ! run total current calculation
+ public :: layer_current            ! computes the layer-to-layer current
 
  public ::  write_tunneling_and_dos ! Print tunneling and dot to file
                                     ! Note: for debug purpose. I/O should be managed
@@ -518,6 +520,18 @@ contains
 
   end subroutine init_structure
 
+  !> Initialize basis
+  subroutine init_basis(negf, coords, nCentral, matrixIndices)
+    type(Tnegf) :: negf
+    real(dp), intent(in) :: coords(:,:)
+    integer, intent(in) :: nCentral
+    integer, intent(in) :: matrixIndices(:)
+
+    call create_TBasis(negf%basis, coords, nCentral, basisToMatrix=matrixIndices)
+
+  end subroutine init_basis
+
+  !> Initialize contanct data
   subroutine init_contacts(negf, ncont)
     type(Tnegf) :: negf
     integer, intent(in) :: ncont
@@ -561,7 +575,7 @@ contains
     type(Tnegf) :: negf
     real(dp), intent(in) :: kpoints(:,:)
     real(dp), intent(in) :: kweights(:)
-    real(dp), intent(in) :: local_kindex(:)
+    integer, intent(in) :: local_kindex(:)
 
     if (size(kpoints,2) /= size(kweights)) then
        STOP 'Error: size of kpoints do not match'
@@ -719,22 +733,32 @@ contains
     ! is changed and the cache type is not, it must be forcibly destroyed
     ! using destroy_surface_green_cache
     tmp = get_surface_green_cache_type(negf)
-    if (params%SGFcache .eq. 0) then
-      if (tmp .ne. 0 .or. .not. allocated(negf%surface_green_cache)) then
-        if (allocated(negf%surface_green_cache)) call negf%surface_green_cache%destroy()
+    select case(params%SGFcache)
+    case(0)
+      if (tmp .ne. 0) then
+        if (allocated(negf%surface_green_cache)) then
+           call negf%surface_green_cache%destroy()
+           deallocate(negf%surface_green_cache)
+        end if
         negf%surface_green_cache = TMatrixCacheDisk(scratch_path=negf%scratch_path)
       end if
-    else if (params%SGFcache .eq. 1) then
-      if (tmp .ne. 1 .or. .not. allocated(negf%surface_green_cache)) then
-        if (allocated(negf%surface_green_cache)) call negf%surface_green_cache%destroy()
+    case(1)
+      if (tmp .ne. 1) then
+        if (allocated(negf%surface_green_cache)) then
+           call negf%surface_green_cache%destroy()
+           deallocate(negf%surface_green_cache)
+        end if
         negf%surface_green_cache = TMatrixCacheMem()
       end if
-    else
-      if (tmp .ne. 2 .or. .not. allocated(negf%surface_green_cache)) then
-        if (allocated(negf%surface_green_cache)) call negf%surface_green_cache%destroy()
+    case(2)
+      if (tmp .ne. 2) then
+        if (allocated(negf%surface_green_cache)) then
+           call negf%surface_green_cache%destroy()
+           deallocate(negf%surface_green_cache)
+        end if
         negf%surface_green_cache = TMatrixCacheDummy()
       end if
-    end if
+    end select
 
   end subroutine set_params
 
@@ -1150,6 +1174,7 @@ contains
     call destroy_DM(negf)
     call destroy_matrices(negf)
     call destroy_surface_green_cache(negf)
+    call destroy_green_cache(negf)
 
   end subroutine destroy_negf
 
@@ -1160,6 +1185,20 @@ contains
     call negf%surface_green_cache%destroy()
 
   end subroutine destroy_surface_green_cache
+
+  !> Destroy green cache
+  subroutine destroy_green_cache(negf)
+    type(Tnegf) :: negf
+
+    if (associated(negf%G_r)) then
+      call negf%G_r%destroy()
+      deallocate(negf%G_r)
+    end if
+    if (associated(negf%G_n)) then
+      call negf%G_n%destroy()
+      deallocate(negf%G_n)
+    end if
+  end subroutine destroy_green_cache
 
 
   !--------------------------------------------------------------------
@@ -1524,7 +1563,8 @@ contains
 
 
     if ( allocated(negf%interactArray) .or. negf%tDephasingBP) then
-       call compute_meir_wingreen(negf);
+       !call compute_meir_wingreen(negf);
+       call compute_layer_current(negf);
     else
        call compute_landauer(negf);
     endif
@@ -1604,6 +1644,27 @@ contains
     call destroy_matrices(negf)
 
   end subroutine compute_meir_wingreen
+
+  !-------------------------------------------------------------------------------
+  !> Calculate current, tunneling and, if specified, density of states using
+  subroutine compute_layer_current(negf)
+
+    type(Tnegf) :: negf
+
+    call extract_cont(negf)
+    call tunneling_int_def(negf)
+    print*,'call layer_current'
+    call layer_current(negf)
+
+    print*,'call electron_current'
+    if (allocated(negf%curr_mat)) then
+      call electron_current_meir_wingreen(negf)
+    end if
+    call destroy_matrices(negf)
+
+  end subroutine compute_layer_current
+
+
 
   ! --------------------------------------------------------------------------------
   ! GP Left in MPI version for debug purpose only. This will write a separate

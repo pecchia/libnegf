@@ -23,8 +23,8 @@
 module elphds
 
   use ln_precision, only : dp
-  use interactions, only : interaction
-  use ln_elastic, only : elastic
+  use interactions, only : TInteraction
+  use ln_elastic, only : TElastic
   use ln_allocation, only : log_allocate, log_deallocate
   use ln_structure, only : TStruct_info
   use mat_def, only : z_csr, z_dns, create, destroy
@@ -35,8 +35,9 @@ module elphds
   private
 
   public :: ElPhonDephS, ElPhonDephS_create
+  public :: ElPhonDephS_init
 
-  type, extends(elastic) :: ElPhonDephS
+  type, extends(TElastic) :: ElPhonDephS
 
     private
     !> Electron-phonon Coupling for each atomic mode in CSR form, dimension energy
@@ -70,6 +71,11 @@ module elphds
 
 contains
 
+  subroutine ElPhonDephS_create(this)
+    class(TInteraction), allocatable :: this
+    allocate(ElPhonDephS::this)  
+  end subroutine ElPhonDephS_create
+  
   !>
   ! Factory for el-ph dephasing diagonal model
   ! @param struct : contact/device partitioning infos
@@ -78,9 +84,8 @@ contains
   ! @param over: overlap matrix in csr
   ! @param niter: fixed number of scba iterations
   ! @param tol: scba tolerance
-  subroutine ElPhonDephS_create(this, struct, coupling, orbsperatm, over, niter)
-
-    type(ElPhonDephS), intent(inout) :: this
+  subroutine ElPhonDephS_init(this, struct, coupling, orbsperatm, over, niter)
+    type(ElPhonDephS) :: this
     type(TStruct_info), intent(in) :: struct
     real(dp), dimension(:), intent(in) :: coupling
     integer, dimension(:), intent(in) :: orbsperatm
@@ -150,7 +155,7 @@ contains
     end do
     call destroy(over_device)
 
-  end subroutine ElPhonDephS_create
+  end subroutine ElPhonDephS_init
 
 
   !> This interface should append

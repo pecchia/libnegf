@@ -23,8 +23,8 @@
 module elphdb
 
   use ln_precision, only : dp
-  !use interactions, only : interaction
-  use ln_elastic, only : elastic
+  use interactions, only : TInteraction
+  use ln_elastic, only : TElastic
   use ln_allocation, only : log_allocate, log_deallocate
   use ln_structure, only : TStruct_info
   use mat_def, only : z_dns, create
@@ -33,8 +33,9 @@ module elphdb
   private
 
   public :: ElPhonDephB, ElPhonDephB_create
+  public :: ElPhonDephB_init
 
-  type, extends(elastic) :: ElPhonDephB
+  type, extends(TElastic) :: ElPhonDephB
 
     private
     !> Electron-phonon coupling per each atomic block, dimension energy
@@ -70,6 +71,12 @@ module elphdb
 
 contains
 
+  !> Creation method must go before anything
+  subroutine ElPhonDephB_create(this)
+    class(TInteraction), allocatable :: this
+    allocate(ElPhonDephB::this)
+  end subroutine ElPhonDephB_create
+
   !>
   ! Factory for el-ph dephasing diagonal model
   ! @param struct : contact/device partitioning infos
@@ -77,7 +84,7 @@ contains
   ! @param orbsperatom: number of orbitals per each atom
   ! @param niter: fixed number of scba iterations
   ! @param tol: scba tolerance
-  subroutine ElPhonDephB_create(this, struct, coupling, orbsperatm, niter)
+  subroutine ElPhonDephB_init(this, struct, coupling, orbsperatm, niter)
 
     type(ElPhonDephB), intent(inout) :: this
     type(TStruct_info), intent(in) :: struct
@@ -151,7 +158,7 @@ contains
       end if
     end do
 
-  end subroutine ElPhonDephB_create
+  end subroutine ElPhonDephB_init
 
 
   !> This interface should append

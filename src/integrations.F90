@@ -57,15 +57,16 @@ module integrations
  public :: tunneling_int_def  !
  public :: tunneling_and_dos  ! computes of T(E) & dos_proj(E)
  public :: meir_wingreen      ! computes effective T(E) with el-ph
+ public :: layer_current      ! computes the current layer-to-layer
  public :: electron_current   ! computes terminal currents
- public :: electron_current_meir_wingreen                                   !DAR
+ public :: electron_current_meir_wingreen
 
  public :: phonon_tunneling   ! computes T(E) for phonons
  public :: phonon_current     ! computes heat currents
  public :: thermal_conductance ! computes thermal conductance
 
  public :: integrate_el       ! integration of tunneling (el)
- public :: integrate_el_meir_wingreen                                       !DAR
+ public :: integrate_el_meir_wingreen
  public :: integrate_ph       ! integration of tunneling (ph)
 
 
@@ -98,13 +99,23 @@ contains
     integer, intent(in) :: verbose
     character(*), intent(in) :: message
     integer, intent(in) :: Npoints
+    if (id0 .and. verbose.gt.30) then
+      write(6,'(a,a,i0,a,a,i0,a)') message,': ',Npoints
+    end if
+  end subroutine write_info
+  !-----------------------------------------------------------------------
+
+  subroutine write_info_parallel(verbose,message,Npoints)
+    integer, intent(in) :: verbose
+    character(*), intent(in) :: message
+    integer, intent(in) :: Npoints
 
      if (id0 .and. verbose.gt.30) then
        write(6,'(a,a,i0,a,a,i0,a)') message,': ',Npoints,' points ', &
             & ' parallelized on ',numprocs,' processes'
      end if
 
-  end subroutine write_info
+  end subroutine write_info_parallel
   !-----------------------------------------------------------------------
 
   subroutine write_real_info(verbose,message,rr)
@@ -117,6 +128,17 @@ contains
      end if
 
   end subroutine write_real_info
+
+  subroutine write_int_info(verbose,message,ii)
+    integer, intent(in) :: verbose
+    character(*), intent(in) :: message
+    integer, intent(in) :: ii
+
+     if (id0 .and. verbose.gt.30) then
+       write(6,'(a,a,i3)') message,': ',ii
+     end if
+
+  end subroutine write_int_info
 
   !-----------------------------------------------------------------------
   subroutine write_point(verbose,gridpn,Npoints)
@@ -714,7 +736,7 @@ contains
      call create(TmpMt,negf%H%nrow,negf%H%ncol,negf%H%nrow)
      call initialize(TmpMt)
 
-     call write_info(negf%verbose,'CONTOUR INTEGRAL',Ntot)
+     call write_info_parallel(negf%verbose,'CONTOUR INTEGRAL',Ntot)
 
      do i = 1, Ntot
 
@@ -859,7 +881,7 @@ contains
     call create(TmpMt,negf%H%nrow,negf%H%ncol,negf%H%nrow)
     call initialize(TmpMt)
 
-    call write_info(negf%verbose,'REAL AXIS INTEGRAL',Npoints)
+    call write_info_parallel(negf%verbose,'REAL AXIS INTEGRAL',Npoints)
 
     do i = 1, Npoints
 
@@ -1196,7 +1218,10 @@ contains
     real(dp) :: wqmax
 
     if (allocated(negf%interactArray)) then
+      print*,'max wq=',get_max_wq(negf%interactArray)
       Nsteps=nint((negf%Emax-negf%Emin+get_max_wq(negf%interactArray))/negf%Estep) + 1
+      print*,'Emin/Emax=',negf%Emin,negf%Emax,negf%Estep
+      print*,'Nsteps=',Nsteps
     else
       Nsteps=nint((negf%Emax-negf%Emin)/negf%Estep) + 1
     end if
@@ -1285,7 +1310,7 @@ contains
     endif
 
     !-------------------------------------------------------
-    call write_info(negf%verbose,'CALCULATION OF COHERENT TRANSMISSION',Nstep)
+    call write_info_parallel(negf%verbose,'CALCULATION OF COHERENT TRANSMISSION',Nstep)
 
     !Loop on energy points: tunneling
     do i = 1, Nstep
@@ -1299,7 +1324,7 @@ contains
        if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
        call compute_contacts(Ec+j*negf%delta,negf,ncyc,Tlc,Tcl,SelfEneR,GS)
        if (id0.and.negf%verbose.gt.VBT) call write_clock
-       call write_real_info(negf%verbose, 'Average number of iterations', ncyc)
+       call write_int_info(negf%verbose, 'Average number of iterations', int(ncyc))
 
        if (.not.do_LEDOS) then
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Tunneling ')
@@ -1404,7 +1429,7 @@ contains
       if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
       call compute_contacts(Ec+j*negf%delta, negf, ncyc, Tlc, Tcl, SelfEneR, GS)
       if (id0.and.negf%verbose.gt.VBT) call write_clock
-      call write_real_info(negf%verbose, 'Average number of iterations', ncyc)
+      call write_int_info(negf%verbose, 'Average number of iterations', int(ncyc))
 
       ! Calculate the SCBA before meir-wingreen current so el-ph self-energies are stored
       if (allocated(negf%interactArray)) then
@@ -1512,7 +1537,7 @@ contains
           if (negf%en_grid(ii)%cpu /= id) cycle
           Ec = negf%en_grid(ii)%Ec
           negf%iE = negf%en_grid(ii)%pt
-
+          print*,'iE',negf%iE
 
           ! ---------------------------------------------------------------------
           ! Compute contact GF
@@ -1527,14 +1552,16 @@ contains
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Gn ')
           ! Avoids cleanup of Gn and ESH components for later use
           negf%tDestroyBlk = .false.
-          call calculate_Gn_neq_components(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,Gn,outer)
+          print*,'call calculate_Gn_neq'
+          !call calculate_Gn_neq_components(negf,real(Ec),SelfEneR,Tlc,Tcl,GS,frm,Gn,outer)
           if (id0.and.negf%verbose.gt.VBT) call write_clock
 
           ! ---------------------------------------------------------------------
           ! Compute layer-to-layer currents and release memory
           ! ---------------------------------------------------------------------
           negf%tDestroyBlk = .true.
-          call iterative_layer_current(negf,real(Ec),curr_mat)
+          print*,'call iterative_layer_current'
+          !call iterative_layer_current(negf,real(Ec),curr_mat)
 
           negf%curr_mat(ii,:) = curr_mat(:) * negf%kwght
 
@@ -1545,13 +1572,15 @@ contains
       ! ---------------------------------------------------------------------
       ! COMPUTE SELF-ENERGIES
       ! ---------------------------------------------------------------------
-      call compute_Sigmas(negf)
+      print*,'call compute_Sigmas'
+      !call compute_Sigmas(negf)
 
-      call electron_current_meir_wingreen(negf)
+      print*,'call compute_electron_current'
+      !call electron_current_meir_wingreen(negf)
 
       !Check SCBA convergence on layer currents
       call negf%scbaDriver%check_J_convergence(negf%currents)
-      call negf%scbaDriver%destroy()
+      !call negf%scbaDriver%destroy()
 
       do icont=1,ncont
         call destroy(Tlc(icont),Tcl(icont),SelfEneR(icont),GS(icont))
@@ -1563,19 +1592,20 @@ contains
     negf%refcont = ref_bk
 
   end subroutine layer_current
-      
+
+  !---------------------------------------------------------------------------
   subroutine compute_sigmas(negf)
-    type(TNegf) :: negf   
+    type(TNegf) :: negf
 
     integer :: ii
 
     if (allocated(negf%interactArray)) then
-      associate(intArray => negf%interactArray)    
+      associate(intArray => negf%interactArray)
       do ii = 1, size(intArray)
           call intArray(ii)%inter%compute_Sigma_r()
           call intArray(ii)%inter%compute_Sigma_n()
       end do
-      end associate   
+      end associate
     end if
   end subroutine compute_sigmas
 
@@ -1825,7 +1855,7 @@ contains
        if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Contact SE ')
        call compute_contacts(Ec+j*delta,negf,ncyc,Tlc,Tcl,SelfEneR,GS)
        if (id0.and.negf%verbose.gt.VBT) call write_clock
-       if (id0.and.negf%verbose.gt.VBT) write(*,*) 'Average number of iterations', ncyc
+       call write_int_info(negf%verbose, 'Average number of iterations', int(ncyc))
 
 
        if (.not.do_LEDOS) then

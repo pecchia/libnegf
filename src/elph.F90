@@ -53,9 +53,13 @@ module elph
   !!     This is needed to verify whether neglecting overlap is ok
   type TModelsEnum
     integer :: dummy = 0
-    integer :: local = 1
-    integer :: semilocal = 2
-    integer :: overlap = 3
+    integer :: dephdiagonal = 1
+    integer :: dephatomblock = 2
+    integer :: dephoverlap = 3
+    integer :: polaroptical = 4
+    integer :: nonpolaroptical = 5
+    integer :: acousticinel = 6
+    integer :: matrixcoupling = 7
   end type TModelsEnum
 
   type(TModelsEnum), parameter :: interaction_models = TModelsEnum()

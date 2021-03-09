@@ -3,13 +3,12 @@ module ln_elastic
   implicit none
   private
 
-  public :: elastic
+  public :: TElastic
 
-  type, abstract, extends(interaction) :: elastic
+  type, abstract, extends(TInteraction) :: TElastic
 
-  
-  end type elastic      
+  end type TElastic
 
-      
+
 end module ln_elastic
 

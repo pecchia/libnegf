@@ -26,7 +26,7 @@ private
 
 public :: TStruct_info, create_TStruct, print_TStruct, kill_TStruct
 public :: TBasisCenters, create_TBasis, destroy_TBasis
-public :: neighbor_map
+public :: TNeighbourMap
 
 type TStruct_Info
    integer, dimension(:), allocatable :: mat_PL_start  !ind(..)
@@ -56,9 +56,9 @@ type TBasisCenters
 end type TBasisCenters
 
 !> type to store neighbour maps between basis centers
-type neighbor_map
+type TNeighbourMap
    integer, DIMENSION(:), ALLOCATABLE :: nn
-end type neighbor_map
+end type TNeighbourMap
 
 contains
 
@@ -191,7 +191,9 @@ contains
     type(TBasisCenters) :: this
     real(dp), intent(in) :: coord(:,:)
     integer, intent(in) :: nCentral
+    ! basis index to matrix index
     integer, intent(in), optional :: basisToMatrix(:)
+    ! matrix index to basis index
     integer, intent(in), optional :: matrixToBasis(:)
 
     integer :: ii, jj, nn
@@ -214,7 +216,7 @@ contains
     ! => matrixToBasis(ind(ii):ind(ii+1)-1) = ii
     if (present(basisToMatrix)) then
       nn = size(basisToMatrix)
-      allocate(this%matrixToBasis(basisToMatrix(nn+1)-1))
+      allocate(this%matrixToBasis(basisToMatrix(nn)-1))
       do ii = 1, nn-1
         this%matrixToBasis(basisToMatrix(ii):basisToMatrix(ii+1)-1) = ii
       end do
