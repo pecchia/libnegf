@@ -70,11 +70,11 @@ contains
   !--------------------------------------------------------------------
   ! SURFACE GREEN's FUNCTION USING THE DECIMATION ITERATION
   !--------------------------------------------------------------------
-  subroutine surface_green(E,HC,SC,pnegf,avncyc,GS)
+  subroutine surface_green(E,HC,SC,pnegf,ncyc,GS)
     complex(dp), intent(in) :: E
     type(z_DNS), intent(in) :: HC,SC
     type(Tnegf) :: pnegf
-    real(dp), intent(inout) :: avncyc  ! Average num. cycles
+    integer, intent(out) :: ncyc
     type(z_DNS), intent(out) :: GS
 
 
@@ -82,12 +82,11 @@ contains
     type(z_DNS) :: gt
 
     integer :: ii,i1,n0,n1,n2,n3,n4,nd,npl,ngs
-    integer :: pnt,ncyc,nfc,verbose,contdim,surfdim
+    integer :: pnt,nfc,verbose,contdim,surfdim
     integer :: flag            ! flag=0 Load contact gs
                                ! flag=1 Compute
                                ! flag=2 Compute and save
     real(kind=dp) :: dens
-    character(10) :: ofpnt
     logical :: lex
     type(TMatLabel) :: label
 
@@ -109,12 +108,9 @@ contains
     ! ngs = surfdim + PL = surfdim + (contdim-surfdim)/2
     ngs = (surfdim + contdim)/2
 
-    avncyc=0.0
     ncyc=0
     nfc=0
 
-    if (pnt.gt.999.and.pnt.le.9999) write(ofpnt,'(i4.4)') pnt
-    if (pnt.gt.9999.and.pnt.le.99999) write(ofpnt,'(i5.5)') pnt
 
     lex = pnegf%surface_green_cache%is_cached(label)
 
@@ -123,9 +119,9 @@ contains
     endif
 
     if(flag.ge.1) then
-        if (id0.and.verbose.gt.VBT) call message_clock('Computing SGF '//ofpnt)
+        if (id0.and.verbose.gt.VBT) call message_clock('Computing SGF ')
     else         !*** load from file ***
-        if (id0.and.verbose.gt.VBT) call message_clock('Loading SGF '//ofpnt)
+        if (id0.and.verbose.gt.VBT) call message_clock('Loading SGF ')
     endif
 
     call create(GS,ngs,ngs)
@@ -211,8 +207,6 @@ contains
 
        endif
 
-       avncyc=avncyc+1.0*ncyc
-
     end if !(Fict Contact or not)
 
 
@@ -239,6 +233,8 @@ contains
     Ao_s=Ao;
 
     do i1 = 1, 300
+      ncyc=i1
+
       call compGreen(Go,Ao,n)
 
       call log_allocate(GoXCo, n, n)
@@ -282,8 +278,6 @@ contains
 
     end do
 
-    ncyc=i1
-
     call compGreen(Go,Ao_s,n)
     call log_deallocate(Ao_s)
 
@@ -291,10 +285,10 @@ contains
 
 !-------------------------------------------------------------------------------
 
-  subroutine compute_contacts_csr(Ec,pnegf,ncyc,Tlc,Tcl,SelfEneR,GS)
+  subroutine compute_contacts_csr(Ec,pnegf,avncyc,Tlc,Tcl,SelfEneR,GS)
     complex(dp), intent(in) :: Ec
     Type(Tnegf), intent(inout) :: pnegf
-    real(dp), intent(out) :: ncyc
+    real(dp), intent(out) :: avncyc
     Type(z_CSR), Dimension(MAXNCONT), intent(in) :: Tlc, Tcl
     Type(z_CSR), Dimension(MAXNCONT), intent(out) :: SelfEneR, GS
 
@@ -302,11 +296,9 @@ contains
     Type(z_DNS) :: GS_d
     Type(z_CSR) :: TpMt
 
-    Integer :: ncont, i, l
-    Real(dp) :: avncyc
+    Integer :: ncyc, ncont, i, l
 
     ncont = pnegf%str%num_conts
-    ncyc = 0
 
     ! -----------------------------------------------------------------------
     !  Calculation of contact self-energies
@@ -314,11 +306,12 @@ contains
     ! For the time HC and SC are dense, GS is sparse (already allocated)
     ! TM and ST are sparse, SelfEneR is allocated inside SelfEnergy
     ! -----------------------------------------------------------------------
+    avncyc = 0.0_dp
 
     do i= 1,ncont
        pnegf%activecont=i
 
-       call surface_green(Ec,pnegf%cont(i)%HC,pnegf%cont(i)%SC,pnegf,avncyc,GS_d)
+       call surface_green(Ec,pnegf%cont(i)%HC,pnegf%cont(i)%SC,pnegf,ncyc,GS_d)
 
        l = nzdrop(GS_d,EPS)
 
@@ -328,7 +321,7 @@ contains
 
        call destroy(GS_d)
 
-       ncyc = ncyc + avncyc*0.5
+       avncyc = avncyc + 1.0_dp*ncyc/ncont
 
        call zdagger(TpMt,Tcl(i))
 
@@ -341,21 +334,20 @@ contains
   end subroutine compute_contacts_csr
 
   !-------------------------------------------------------------------------------
-  subroutine compute_contacts_dns(Ec,pnegf,ncyc,Tlc,Tcl,SelfEneR,GS)
+  subroutine compute_contacts_dns(Ec,pnegf,avncyc,Tlc,Tcl,SelfEneR,GS)
     complex(dp), intent(in) :: Ec
     Type(Tnegf), intent(inout) :: pnegf
-    real(dp), intent(out) :: ncyc
+    real(dp), intent(out) :: avncyc
     Type(z_DNS), Dimension(MAXNCONT), intent(inout) :: Tlc, Tcl
     Type(z_DNS), Dimension(MAXNCONT), intent(out) :: SelfEneR, GS
 
 
     Type(z_DNS) :: TpMt
 
-    Integer :: ncont, i
-    real(dp) :: avncyc
+    Integer :: ncyc, ncont, i
 
     ncont = pnegf%str%num_conts
-    ncyc = 0
+    avncyc = 0.0_dp
 
     ! -----------------------------------------------------------------------
     !  Calculation of contact self-energies
@@ -368,9 +360,9 @@ contains
 
        pnegf%activecont=i
 
-       call surface_green(Ec,pnegf%cont(i)%HC,pnegf%cont(i)%SC,pnegf,avncyc,GS(i))
+       call surface_green(Ec,pnegf%cont(i)%HC,pnegf%cont(i)%SC,pnegf,ncyc,GS(i))
 
-       ncyc = ncyc + avncyc*0.5
+       avncyc = avncyc + ncyc*1.0_dp/ncont
 
        call prealloc_sum(pnegf%cont(i)%HMC,pnegf%cont(i)%SMC,(-1.d0, 0.d0),Ec,Tlc(i))
 
@@ -488,8 +480,6 @@ contains
     complex(dp), dimension(:), allocatable :: kzi
     integer :: i1, i2, j1, j2
     type(TStatesSummary) :: summ
-
-    !!if(id0.and.verbose.gt.VBT) call message_clock('Computing SGF ')
 
     !  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     ! STEP 1: Solve Complex Bands and sort traveling bloch states
