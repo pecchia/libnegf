@@ -56,10 +56,10 @@ module mpi_globals
     subroutine negf_cart_init(inComm, nk, cartComm, energyComm, kComm)
       type(mpifx_comm), intent(in) :: inComm
       integer, intent(in) :: nk
-      type(mpifx_comm), intent(out) :: energyComm
-      type(mpifx_comm), intent(out) :: kComm
+      type(mpifx_comm), intent(inout) :: cartComm
+      type(mpifx_comm), intent(inout) :: energyComm
+      type(mpifx_comm), intent(inout) :: kComm
 
-      type(mpifx_comm) :: cartComm
       integer :: outComm
       integer :: ndims = 2
       integer :: dims(2)
@@ -74,20 +74,36 @@ module mpi_globals
       end if
       nE = inComm%size/nk
       dims(1)=nk; dims(2)=nE
-
+      call mpifx_barrier(inComm, mpierr) 
+!print*,'MPI_CART_CREATE'
       call MPI_CART_CREATE(inComm%id, ndims, dims, periods, reorder, outComm, mpierr)
       call cartComm%init(outComm, mpierr)
+      call mpifx_barrier(inComm, mpierr) 
 
       remain_dims = (/0, 1/)
+!print*,'MPI_CART_SUB E'
       call MPI_CART_SUB(cartComm%id, remain_dims, outComm, mpierr)
       call energyComm%init(outComm, mpierr)
+      call mpifx_barrier(inComm, mpierr) 
 
       remain_dims = (/1, 0/)
+!print*,'MPI_CART_SUB K'
       call MPI_CART_SUB(cartComm%id, remain_dims, outComm, mpierr)
       call kComm%init(outComm, mpierr)
+      call mpifx_barrier(inComm, mpierr) 
 
     end subroutine negf_cart_init
 
+    subroutine print_comm(comm)
+      type(mpifx_comm), intent(in) :: comm
+   
+      print*,'id:', Comm%id         !< Communicator id.
+      print*,'size:', Comm%size       !< Nr. of processes (size).
+      print*,'rank:', Comm%rank       !< Rank of the current process.
+      print*,'leadrank:', Comm%leadrank   !< Index of the lead node.
+      print*,'lead:', Comm%lead       !< True if current process is the lead (rank == 0).
+    
+    end subroutine print_comm
 
 #:endif
 
