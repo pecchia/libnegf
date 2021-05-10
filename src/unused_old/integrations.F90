@@ -180,6 +180,7 @@ contains
     ncont = negf%str%num_conts
 
     Nstep = size(negf%en_grid)
+    write(*,*) 'integrations: ldos_int'
     call log_allocate(negf%ldos_mat, Nstep, negf%ndos_proj)
     negf%ldos_mat(:,:)=0.d0
 
@@ -722,6 +723,7 @@ contains
      call initialize(TmpMt)
 
      call write_info(negf%verbose,'CONTOUR INTEGRAL',Ntot)
+     write(*,*) 'integrations: contour_int'
      do i = 1, Ntot
 
         call write_point(negf%verbose,negf%en_grid(i), Ntot)
@@ -862,6 +864,7 @@ contains
     outer = negf%outer
     Npoints = size(negf%en_grid)
 
+    write(*,*) 'integrations: real_axis_int'
     call log_allocate(frm_f,ncont)
 
     call create(TmpMt,negf%H%nrow,negf%H%ncol,negf%H%nrow)
@@ -1261,6 +1264,7 @@ contains
 
     !-------------------------------------------------------
 
+    write(*,*) 'integrations: tunneling_and_dos'
     do_LEDOS = .false.
     if(negf%ndos_proj.gt.0) do_LEDOS=.true.
     ncont = negf%str%num_conts
@@ -1394,6 +1398,7 @@ contains
 
     !call create_SGF_SE(negf)
     !call read_SGF_SE(negf)
+    write(*,*) 'integrations: meir_weingreen'
 
     negf%readOldSGF = negf%readOldT_SGFs
     !! Loop on energy points
@@ -1598,6 +1603,7 @@ contains
 
     size_ni = size(negf%tunn_mat,2)
 
+    write(*,*) 'integrations: electron_current'
     !print *, 'negf%ni',negf%ni
     !print *, 'negf%nf',negf%nf
     !print *, 'negf%ref',negf%refcont
@@ -1638,6 +1644,7 @@ contains
     end if
 
     size_ni = size(negf%curr_mat,2)
+    write(*,*) 'integrations: electron_current_meir_wingreen'
 
     ! If previous calculation is there, destroy it
     if (allocated(negf%currents)) call log_deallocate(negf%currents)

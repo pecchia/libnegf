@@ -149,6 +149,7 @@ CONTAINS
          ESH(cblk(i),cblk(i))%val = ESH(cblk(i),cblk(i))%val-SelfEneR(i)%val
       end do
     end associate
+    write(*,*) 'Routine: calculate_Gr'
     !! Add interaction self energy contribution, if any
     if (allocated(negf%inter)) call negf%inter%add_sigma_r(ESH)
 #:if defined("GPU")
@@ -258,6 +259,7 @@ CONTAINS
     associate (cblk=>negf%str%cblk, indblk=>negf%str%mat_PL_start)
 
       Ec = cmplx(E,0.0_dp,dp)
+      write(*,*) 'Routine: calculate_Gn_neq_comp'
 
       ! Take CSR H,S and build ES-H in dense blocks
       call prealloc_sum(negf%H,negf%S,(-1.0_dp, 0.0_dp),Ec,ESH_tot)
@@ -455,6 +457,7 @@ CONTAINS
       end if
 
       Ec=cmplx(E,0.0_dp,dp)
+      write(*,*) 'Routine: iterative_meir_w'
 
       call prealloc_sum(negf%H,negf%S,(-1.0_dp, 0.0_dp),Ec,ESH_tot)
 
@@ -3007,6 +3010,7 @@ CONTAINS
        return
     end if
 
+    write(*,*) 'Routine: calculate_transmissions'
     !Calculation of ES-H and brak into blocks
     call prealloc_sum(H,S,(-1.0_dp, 0.0_dp),Ec,ESH_tot)
 
@@ -3031,8 +3035,10 @@ CONTAINS
     endif
 
 #:if defined("GPU")
+    write(*,*) 'transmissions: about to copy SE and ESH on GPU'
     call copy_trid_toGPU(ESH)
     call copy_vdns_toGPU(SelfEneR)
+    write(*,*) 'transmissions: copied SE and ESH on GPU'
 #:endif
 
     ! Fall here when there are 2 contacts for fast transmission
@@ -3044,7 +3050,9 @@ CONTAINS
        !#:if defined("GPU")
        !       call copy_trid_toHOST(Gr) 
        !#:endif
+       write(*,*) 'transmissions: about to call 2 conts'
        call calculate_single_transmission_2_contacts(negf,nit,nft,ESH,SelfEneR,str%cblk,tun_proj,Gr,tun)
+       write(*,*) 'transmissions: called 2 conts'
        tun_mat(1) = tun
 
     else
@@ -3082,7 +3090,9 @@ CONTAINS
              endif
           endif
 
+          write(*,*) 'transmissions: about to call N conts'
           call calculate_single_transmission_N_contacts(negf,nit,nft,ESH,SelfEneR,str%cblk,tun_proj,gsmr,Gr,tun)
+          write(*,*) 'transmissions: called N conts'
           tun_mat(icpl) = tun
 
        end do
@@ -3158,8 +3168,11 @@ CONTAINS
     end do
 
 #:if defined("GPU")
+    write(*,*) 'trans_and_dos: about to copy ESH'
     call copy_trid_toGPU(ESH)
+    write(*,*) 'trans_and_dos: copied ESH on GPU'
     call copy_vdns_toGPU(SelfEneR)
+    write(*,*) 'trans_and_dos: copied SE on GPU'
 #:endif
 
     call allocate_gsm(gsmr,nbl)
@@ -3178,9 +3191,13 @@ CONTAINS
        case(1)
           tun = 0.0_dp
        case(2)
+          write(*,*) 'trans_and_dos: about to call 2_conts'
           call calculate_single_transmission_2_contacts(negf,nit,nft,ESH,SelfEneR,str%cblk,tun_proj,Gr,tun)
+          write(*,*) 'trans_and_dos: called 2_conts'
        case default
+          write(*,*) 'trans_and_dos: about to call N_conts'
           call calculate_single_transmission_N_contacts(negf,nit,nft,ESH,SelfEneR,str%cblk,tun_proj,gsmr,Gr,tun)
+          write(*,*) 'trans_and_dos: called N_conts'
        end select
        TUN_MAT(icpl) = tun
 
@@ -3211,7 +3228,9 @@ CONTAINS
     Grm%rowpnt(:)=1
 
 #:if defined("GPU")
+    write(*,*) 'trans_and_dos: about to delete SE'
     call delete_vdns_fromGPU(SelfEneR)
+    write(*,*) 'trans_and_dos: deleted SE'
     do i=1,nbl
        call create(GrCSR,Gr(i,i)%nrow,Gr(i,i)%ncol,Gr(i,i)%nrow*Gr(i,i)%ncol)
        call dns2csr(Gr(i,i),GrCSR)

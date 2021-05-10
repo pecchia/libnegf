@@ -806,26 +806,21 @@ contains
     endif
 
     bl1=cblk(ct1);
-    write(*,*) '2_conts: check 1'
     call createAll(GA, Gr(bl1,bl1)%ncol, Gr(bl1,bl1)%nrow)
     call dagger_gpu(Gr(bl1,bl1),GA)
 
     ! Computes the Gamma matrices
-    write(*,*) '2_conts: check 2'
     call createAll(GAM1_dns, SelfEneR(ct1)%nrow, SelfEneR(ct1)%ncol)
     call spectral_gpu(SelfEneR(ct1),GAM1_dns)
 
     ! Work to compute transmission matrix (Gamma G Gamma G)
-    write(*,*) '2_conts: check 3'
     call createAll(work1, GAM1_dns%nrow, Gr(bl1,bl1)%ncol)
-    write(*,*) '2_conts: check 4'
     call createAll(work2, work1%nrow, GAM1_dns%ncol)
     call matmul_gpu(hh, one, GAM1_dns%val, Gr(bl1,bl1)%val, zero, work1%val)
     call matmul_gpu(hh, one, work1%val, GAM1_dns%val, zero, work2%val)
 
     call destroyAll(work1)
 
-    write(*,*) '2_conts: check 5'
     call createAll(work1, work2%nrow, GA%ncol)
     call matmul_gpu(hh, one, work2%val, GA%val, zero, work1%val)
     call destroyAll(work2)
@@ -835,27 +830,22 @@ contains
     call destroyAll(GA)
 
     call createAll(work2, GAM1_dns%nrow, AA%ncol)
-    write(*,*) '2_conts: check 6'
     call matmul_gpu(hh, one, GAM1_dns%val, AA%val, zero, work2%val)
     call destroyAll(GAM1_dns)
     call destroyAll(AA)
 
     call createAll(TRS, work1%nrow, work1%ncol)
     call add_gpu(one,work2,mone,work1,TRS)
-    write(*,*) '2_conts: check 7'
     call get_tun_mask(ESH, bl1, tun_proj, tun_mask)
 
     call CopyToGPU(tun_mask)
-    write(*,*) '2_conts: check 8'
     TUN = abs(real(trace_gpu(TRS, tun_mask)))
-    write(*,*) '2_conts: TUN=', TUN
     call deleteGPU(tun_mask)
     call log_deallocate(tun_mask)
 
     call destroyAll(TRS)
     call destroyAll(work1)
     call destroyAll(work2)
-    write(*,*) '2_conts: check 9'
   end subroutine calculate_single_transmission_2_contacts_sp
 
   subroutine calculate_single_transmission_2_contacts_dp(negf,ni,nf,ESH,SelfEneR,cblk,tun_proj,Gr,TUN)
@@ -897,26 +887,21 @@ contains
     endif
 
     bl1=cblk(ct1);
-    write(*,*) '2_conts: check 1'
     call createAll(GA, Gr(bl1,bl1)%ncol, Gr(bl1,bl1)%nrow)
     call dagger_gpu(Gr(bl1,bl1),GA)
 
     ! Computes the Gamma matrices
-    write(*,*) '2_conts: check 2'
     call createAll(GAM1_dns, SelfEneR(ct1)%nrow, SelfEneR(ct1)%ncol)
     call spectral_gpu(SelfEneR(ct1),GAM1_dns)
 
     ! Work to compute transmission matrix (Gamma G Gamma G)
-    write(*,*) '2_conts: check 3'
     call createAll(work1, GAM1_dns%nrow, Gr(bl1,bl1)%ncol)
-    write(*,*) '2_conts: check 4'
     call createAll(work2, work1%nrow, GAM1_dns%ncol)
     call matmul_gpu(hh, one, GAM1_dns%val, Gr(bl1,bl1)%val, zero, work1%val)
     call matmul_gpu(hh, one, work1%val, GAM1_dns%val, zero, work2%val)
 
     call destroyAll(work1)
 
-    write(*,*) '2_conts: check 5'
     call createAll(work1, work2%nrow, GA%ncol)
     call matmul_gpu(hh, one, work2%val, GA%val, zero, work1%val)
     call destroyAll(work2)
@@ -926,27 +911,22 @@ contains
     call destroyAll(GA)
 
     call createAll(work2, GAM1_dns%nrow, AA%ncol)
-    write(*,*) '2_conts: check 6'
     call matmul_gpu(hh, one, GAM1_dns%val, AA%val, zero, work2%val)
     call destroyAll(GAM1_dns)
     call destroyAll(AA)
 
     call createAll(TRS, work1%nrow, work1%ncol)
     call add_gpu(one,work2,mone,work1,TRS)
-    write(*,*) '2_conts: check 7'
     call get_tun_mask(ESH, bl1, tun_proj, tun_mask)
 
     call CopyToGPU(tun_mask)
-    write(*,*) '2_conts: check 8'
     TUN = abs(real(trace_gpu(TRS, tun_mask)))
-    write(*,*) '2_conts: TUN=', TUN
     call deleteGPU(tun_mask)
     call log_deallocate(tun_mask)
 
     call destroyAll(TRS)
     call destroyAll(work1)
     call destroyAll(work2)
-    write(*,*) '2_conts: check 9'
 
   end subroutine calculate_single_transmission_2_contacts_dp
 
@@ -992,7 +972,6 @@ contains
        do i = bl1+1, bl2
           !Checks whether previous block is non null.
           !If so next block is also null => TUN = 0
-          write(*,*) 'N_conts: check 1'
           call copyFromGPU(Gr(i-1,bl1))
           max=maxval(abs(Gr(i-1,bl1)%val))
 
@@ -1000,18 +979,14 @@ contains
              TUN = EPS*EPS !for log plots
              !Destroy also the block adjecent to diagonal since
              !this is not deallocated anymore in calling subroutine
-             write(*,*) 'N_conts: check 2'
              if (i.gt.(bl1+1)) call destroyAll(Gr(i-1,bl1))
-             write(*,*) 'N_conts: check 3'
              return
           endif
 
           !Checks whether block has been created, if not do it
           if (.not.allocated(Gr(i,bl1)%val)) then  !PROBLEMA QUI
 
-             write(*,*) 'N_conts: check 4'
              call createAll(work1, gsmr(i)%nrow, ESH(i,i-1)%ncol)
-             write(*,*) 'N_conts: check 5'
              call createAll(Gr(i,bl1), work1%nrow, Gr(i-1,bl1)%ncol)
              call matmul_gpu(hh, mone, gsmr(i)%val, ESH(i,i-1)%val, zero, work1%val)
              call matmul_gpu(hh, one, work1%val, Gr(i-1,bl1)%val ,zero, Gr(i,bl1)%val)
@@ -1025,20 +1000,17 @@ contains
 
     endif
     ! Computes the Gamma matrices
-    write(*,*) 'N_conts: check 6'
     call createAll(GAM1_dns, SelfEneR(ct1)%nrow, SelfEneR(ct1)%ncol)
     call createAll(GAM2_dns, SelfEneR(ct2)%nrow, SelfEneR(ct2)%ncol)
     call spectral_gpu(SelfEneR(ct1),GAM1_dns)
     call spectral_gpu(SelfEneR(ct2),GAM2_dns)
 
     ! Work to compute transmission matrix (Gamma2 Gr Gamma1 Ga)
-    write(*,*) 'N_conts: check 7'
     call createAll(work1, GAM2_dns%nrow, Gr(bl2,bl1)%ncol)
     call matmul_gpu(hh, one, GAM2_dns%val, Gr(bl2,bl1)%val, zero, work1%val)
     call destroyAll(GAM2_dns)
 
     call createAll(work2, work1%nrow, GAM1_dns%ncol)
-    write(*,*) 'N_conts: check 8'
     call matmul_gpu(hh, one, work1%val, GAM1_dns%val, zero, work2%val)
     call destroyAll(work1)
     call destroyAll(GAM1_dns)
@@ -1054,16 +1026,13 @@ contains
     call destroyAll(GA)
 
     call get_tun_mask(ESH, bl2, tun_proj, tun_mask)
-    write(*,*) 'N_conts: check 9'
     call copyToGPU(tun_mask)
 
     TUN = abs(real(trace_gpu(TRS, tun_mask)))
-    write(*,*) 'N_conts: TUN=', TUN 
     call deleteGPU(tun_mask) 
     call log_deallocate(tun_mask)
 
     call destroyAll(TRS)
-    write(*,*) 'N_conts: check 10'
   end subroutine calculate_single_transmission_N_contacts_sp
 
   subroutine calculate_single_transmission_N_contacts_dp(negf,ni,nf,ESH,SelfEneR,cblk,tun_proj,gsmr,Gr,TUN)
@@ -1106,7 +1075,6 @@ contains
        do i = bl1+1, bl2
           !Checks whether previous block is non null.
           !If so next block is also null => TUN = 0
-          write(*,*) 'N_conts: check 1'
           call copyFromGPU(Gr(i-1,bl1))
           max=maxval(abs(Gr(i-1,bl1)%val))
 
@@ -1114,18 +1082,14 @@ contains
              TUN = EPS*EPS !for log plots
              !Destroy also the block adjecent to diagonal since
              !this is not deallocated anymore in calling subroutine
-             write(*,*) 'N_conts: check 2'
              if (i.gt.(bl1+1)) call destroyAll(Gr(i-1,bl1))
-             write(*,*) 'N_conts: check 3'
              return
           endif
 
           !Checks whether block has been created, if not do it
           if (.not.allocated(Gr(i,bl1)%val)) then  !PROBLEMA QUI
 
-             write(*,*) 'N_conts: check 4'
              call createAll(work1, gsmr(i)%nrow, ESH(i,i-1)%ncol)
-             write(*,*) 'N_conts: check 5'
              call createAll(Gr(i,bl1), work1%nrow, Gr(i-1,bl1)%ncol)
              call matmul_gpu(hh, mone, gsmr(i)%val, ESH(i,i-1)%val, zero, work1%val)
              call matmul_gpu(hh, one, work1%val, Gr(i-1,bl1)%val ,zero, Gr(i,bl1)%val)
@@ -1139,22 +1103,17 @@ contains
 
     endif
     ! Computes the Gamma matrices
-    write(*,*) 'N_conts: check 6'
     call createAll(GAM1_dns, SelfEneR(ct1)%nrow, SelfEneR(ct1)%ncol)
     call createAll(GAM2_dns, SelfEneR(ct2)%nrow, SelfEneR(ct2)%ncol)
     call spectral_gpu(SelfEneR(ct1),GAM1_dns)
     call spectral_gpu(SelfEneR(ct2),GAM2_dns)
 
     ! Work to compute transmission matrix (Gamma2 Gr Gamma1 Ga)
-    write(*,*) 'N_conts: check 7'
-    call sum_gpu(hh, Gr(bl2,bl1)%val,summ)
-    write(*,*) 'sum Gr(',bl2,',',bl1,')=', summ
     call createAll(work1, GAM2_dns%nrow, Gr(bl2,bl1)%ncol)
     call matmul_gpu(hh, one, GAM2_dns%val, Gr(bl2,bl1)%val, zero, work1%val)
     call destroyAll(GAM2_dns)
 
     call createAll(work2, work1%nrow, GAM1_dns%ncol)
-    write(*,*) 'N_conts: check 8'
     call matmul_gpu(hh, one, work1%val, GAM1_dns%val, zero, work2%val)
     call destroyAll(work1)
     call destroyAll(GAM1_dns)
@@ -1170,7 +1129,6 @@ contains
     call destroyAll(GA)
 
     call get_tun_mask(ESH, bl2, tun_proj, tun_mask)
-    write(*,*) 'N_conts: check 9'
     call copyToGPU(tun_mask)
 
     TUN = abs(real(trace_gpu(TRS, tun_mask)))
@@ -1179,7 +1137,6 @@ contains
     call log_deallocate(tun_mask)
 
     call destroyAll(TRS)
-    write(*,*) 'N_conts: check 10'
 
   end subroutine calculate_single_transmission_N_contacts_dp
 
