@@ -476,35 +476,18 @@ contains
           call matmul_gpu(hh, one, gsmr(i)%val, ESH(i,i-1)%val, zero, work1%val)
           call matmul_gpu(hh, mone, work1%val, Gr(i-1,i-1)%val, zero, Gr(i,i-1)%val)
 
-              call sum_gpu(hh, gsmr(i)%val, summ)
-              write(*,*) 'sum gsmr(2)=', summ
-              call sum_gpu(hh, ESH(i,i-1)%val, summ)
-              write(*,*) 'sum ESH(',i,i-1,')=', summ
-              call sum_gpu(hh, work1%val, summ)
-              write(*,*) 'sum work1=', summ
-              call sum_gpu(hh, Gr(i-1,i-1)%val, summ)
-              write(*,*) 'sum Gr(',i-1,i-1,')=', summ
-              call sum_gpu(hh, Gr(i,i-1)%val, summ)
-              write(*,*) 'sum Gr(',i,i-1,')=', summ
-          
           call destroyAll(work1)
           call createAll(work2, ESH(i-1,i)%nrow, gsmr(i)%ncol)
           call createAll(Gr(i-1,i), Gr(i-1,i-1)%nrow, work2%ncol)
           call matmul_gpu(hh, one, ESH(i-1,i)%val, gsmr(i)%val, zero, work2%val)
           call matmul_gpu(hh, mone, Gr(i-1,i-1)%val, work2%val, zero, Gr(i-1,i)%val)
 
-              call sum_gpu(hh, Gr(i-1,i)%val, summ)
-              write(*,*) 'sum Gr(',i-1,i,')=', summ
-          
           call createAll(work1, Gr(i,i-1)%nrow, work2%ncol)
           call matmul_gpu(hh, mone, Gr(i,i-1)%val, work2%val, zero, work1%val)
 
           call destroyAll(work2)
           call createAll(Gr(i,i), gsmr(i)%nrow, gsmr(i)%ncol)
           call add_cublas(hh, Gr(i,i)%val, gsmr(i)%val, one, work1%val)
-              
-              call sum_gpu(hh, Gr(i,i)%val, summ)
-              write(*,*) 'sum Gr(',i,i,')=', summ
           call destroyAll(work1)
        end do
     else
