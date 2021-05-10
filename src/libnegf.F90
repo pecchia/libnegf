@@ -1126,7 +1126,10 @@ contains
     call destroy_DM(negf)
     call destroy_matrices(negf)
     call destroy_surface_green_cache(negf)
-
+ #:if defined("GPU")
+    istat = cublasDestroy(negf%hcublas)
+    istat = cusolverDnDestroy(negf%hcusolver)
+ #:endif
   end subroutine destroy_negf
 
   !> Destroy the surface green cache.
