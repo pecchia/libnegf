@@ -180,7 +180,7 @@ contains
     ncont = negf%str%num_conts
 
     Nstep = size(negf%en_grid)
-    write(*,*) 'integrations: ldos_int'
+
     call log_allocate(negf%ldos_mat, Nstep, negf%ndos_proj)
     negf%ldos_mat(:,:)=0.d0
 
@@ -723,7 +723,7 @@ contains
      call initialize(TmpMt)
 
      call write_info(negf%verbose,'CONTOUR INTEGRAL',Ntot)
-     write(*,*) 'integrations: contour_int'
+
      do i = 1, Ntot
 
         call write_point(negf%verbose,negf%en_grid(i), Ntot)
@@ -864,7 +864,6 @@ contains
     outer = negf%outer
     Npoints = size(negf%en_grid)
 
-    write(*,*) 'integrations: real_axis_int'
     call log_allocate(frm_f,ncont)
 
     call create(TmpMt,negf%H%nrow,negf%H%ncol,negf%H%nrow)
@@ -1264,7 +1263,6 @@ contains
 
     !-------------------------------------------------------
 
-    write(*,*) 'integrations: tunneling_and_dos'
     do_LEDOS = .false.
     if(negf%ndos_proj.gt.0) do_LEDOS=.true.
     ncont = negf%str%num_conts
@@ -1318,7 +1316,7 @@ contains
        if (.not.do_LEDOS) then
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Tunneling ')
 
-          call calculate_transmissions(negf,negf%H,negf%S,Ec,SelfEneR,negf%ni,negf%nf, &
+          call calculate_transmissions(negf%H,negf%S,Ec,SelfEneR,negf%ni,negf%nf, &
                              & negf%str, negf%tun_proj, TUN_MAT)
 
           negf%tunn_mat(i,:) = TUN_MAT(:) * negf%wght
@@ -1326,7 +1324,7 @@ contains
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Tunneling and DOS')
           LEDOS(:) = 0.d0
 
-          call calculate_transmissions_and_dos(negf,negf%H,negf%S,Ec,SelfEneR,GS,negf%ni,negf%nf, &
+          call calculate_transmissions_and_dos(negf%H,negf%S,Ec,SelfEneR,GS,negf%ni,negf%nf, &
                              & negf%str, negf%tun_proj, TUN_MAT, negf%dos_proj, LEDOS)
 
           negf%tunn_mat(i,:) = TUN_MAT(:) * negf%wght
@@ -1398,7 +1396,6 @@ contains
 
     !call create_SGF_SE(negf)
     !call read_SGF_SE(negf)
-    write(*,*) 'integrations: meir_weingreen'
 
     negf%readOldSGF = negf%readOldT_SGFs
     !! Loop on energy points
@@ -1603,7 +1600,6 @@ contains
 
     size_ni = size(negf%tunn_mat,2)
 
-    write(*,*) 'integrations: electron_current'
     !print *, 'negf%ni',negf%ni
     !print *, 'negf%nf',negf%nf
     !print *, 'negf%ref',negf%refcont
@@ -1644,7 +1640,6 @@ contains
     end if
 
     size_ni = size(negf%curr_mat,2)
-    write(*,*) 'integrations: electron_current_meir_wingreen'
 
     ! If previous calculation is there, destroy it
     if (allocated(negf%currents)) call log_deallocate(negf%currents)
@@ -1740,7 +1735,7 @@ contains
        if (.not.do_LEDOS) then
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Tunneling ')
 
-          call calculate_transmissions(negf,negf%H,negf%S,Ec,SelfEneR,negf%ni,negf%nf, &
+          call calculate_transmissions(negf%H,negf%S,Ec,SelfEneR,negf%ni,negf%nf, &
                              & negf%str, negf%tun_proj, TUN_MAT)
 
           negf%tunn_mat(i,:) = TUN_MAT(:) * negf%wght
@@ -1748,7 +1743,7 @@ contains
           if (id0.and.negf%verbose.gt.VBT) call message_clock('Compute Tunneling and DOS')
           LEDOS(:) = 0.d0
 
-          call calculate_transmissions_and_dos(negf,negf%H,negf%S,Ec,SelfEneR,GS,negf%ni,negf%nf, &
+          call calculate_transmissions_and_dos(negf%H,negf%S,Ec,SelfEneR,GS,negf%ni,negf%nf, &
                              & negf%str, negf%tun_proj, TUN_MAT, negf%dos_proj, LEDOS)
 
           negf%tunn_mat(i,:) = TUN_MAT(:) * negf%wght
