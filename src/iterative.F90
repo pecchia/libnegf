@@ -3194,8 +3194,6 @@ CONTAINS
     call allocate_blk_dns(Gr,nbl)
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,1)
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,2,nbl)
-    call sum_gpu(negf%hcublas, Gr(2,1)%val, summ)
-    write(*,*) 'trans and dos: sum Gr(2,1)=', summ
     !Computation of transmission(s) between contacts ni(:) -> nf(:)
     do icpl=1,size(ni)
 
