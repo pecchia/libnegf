@@ -21,6 +21,8 @@ module iterative_gpu
   public :: calculate_Gn_tridiag_blocks
   public :: calculate_single_transmission_2_contacts
   public :: calculate_single_transmission_N_contacts
+  public :: check_convergence_trid
+  public :: check_convergence_vec
 
   interface calculate_gsmr_blocks
      module procedure  calculate_gsmr_blocks_sp
@@ -71,9 +73,9 @@ contains
     !Work
     type(CublasHandle) :: hh
     type(CusolverDnHandle) :: hhsol
-    complex(sp), parameter :: one = (1.0, 0.0)
-    complex(sp), parameter :: mone = (-1.0, 0.0)
-    complex(sp), parameter :: zero = (0.0, 0.0)
+    complex(sp), parameter :: one = (1.0_sp, 0.0_sp)
+    complex(sp), parameter :: mone = (-1.0_sp, 0.0_sp)
+    complex(sp), parameter :: zero = (0.0_sp, 0.0_sp)
     type(c_DNS) :: work1, work2
     integer :: nrow, ncol
     integer :: i, nbl, istat
@@ -134,9 +136,9 @@ contains
     !Work
     type(CublasHandle) :: hh
     type(CusolverDnHandle) :: hhsol
-    complex(dp), parameter :: one = (1.0, 0.0)
-    complex(dp), parameter :: mone = (-1.0, 0.0)
-    complex(dp), parameter :: zero = (0.0, 0.0)
+    complex(dp), parameter :: one = (1.0_dp, 0.0_dp)
+    complex(dp), parameter :: mone = (-1.0_dp, 0.0_dp)
+    complex(dp), parameter :: zero = (0.0_dp, 0.0_dp)
     type(z_DNS) :: work1, work2
     integer :: nrow, ncol
     integer :: i, nbl, istat
@@ -198,9 +200,9 @@ contains
     !Work
     type(CublasHandle) :: hh
     type(CusolverDnHandle) :: hhsol
-    complex(sp), parameter :: one = (1.0, 0.0)
-    complex(sp), parameter :: mone = (-1.0, 0.0)
-    complex(sp), parameter :: zero = (0.0, 0.0)
+    complex(sp), parameter :: one = (1.0_sp, 0.0_sp)
+    complex(sp), parameter :: mone = (-1.0_sp, 0.0_sp)
+    complex(sp), parameter :: zero = (0.0_sp, 0.0_sp)
     type(c_DNS) :: work1, work2
     integer :: nrow, ncol
     integer :: i, nbl, istat
@@ -250,9 +252,9 @@ contains
     !Work
     type(CublasHandle) :: hh
     type(CusolverDnHandle) :: hhsol
-    complex(dp), parameter :: one = (1.0, 0.0)
-    complex(dp), parameter :: mone = (-1.0, 0.0)
-    complex(dp), parameter :: zero = (0.0, 0.0)
+    complex(dp), parameter :: one = (1.0_dp, 0.0_dp)
+    complex(dp), parameter :: mone = (-1.0_dp, 0.0_dp)
+    complex(dp), parameter :: zero = (0.0_dp, 0.0_dp)
     type(z_DNS) :: work1, work2
     integer :: nrow, ncol
     integer :: i, nbl, istat
@@ -306,9 +308,9 @@ contains
     type(CusolverDnHandle) ::hhsol
     integer :: i,nrow,nbl
     type(c_DNS), target :: work1, work2, work3
-    complex(sp), parameter :: one = (1.0, 0.0)
-    complex(sp), parameter :: mone = (-1.0, 0.0)
-    complex(sp), parameter :: zero = (0.0, 0.0)
+    complex(sp), parameter :: one = (1.0_sp, 0.0_sp)
+    complex(sp), parameter :: mone = (-1.0_sp, 0.0_sp)
+    complex(sp), parameter :: zero = (0.0_sp, 0.0_sp)
     integer :: istat
 
     nbl = size(ESH,1)
@@ -418,9 +420,10 @@ contains
     type(CusolverDnHandle) :: hhsol
     integer :: i, nrow, nbl, istat
     type(z_DNS), target :: work1, work2, work3
-    complex(dp), parameter :: one = (1.0, 0.0)
-    complex(dp), parameter :: mone = (-1.0, 0.0)
-    complex(dp), parameter :: zero = (0.0, 0.0)
+    complex(dp), parameter :: one = (1.0_dp, 0.0_dp)
+    complex(dp), parameter :: mone = (-1.0_dp, 0.0_dp)
+    complex(dp), parameter :: zero = (0.0_dp, 0.0_dp)
+    real(dp) :: summ
 
     nbl = size(ESH,1)
     hh = negf%hcublas
@@ -512,8 +515,80 @@ contains
           call destroyAll(work1)
        end do
     endif
-
+           
   end subroutine calculate_Gr_tridiag_blocks_dp
+
+  subroutine check_convergence_trid(negf,T,nome,gpu)
+    type(Tnegf), intent(in) :: negf      
+    type(z_DNS), dimension(:,:), intent(in) :: T
+    character(3), intent(in) :: nome
+    logical, intent(in) :: gpu
+
+    integer :: nbl, i
+    type(CublasHandle) :: hh   
+    real(dp) :: summ 
+
+    nbl = size(T,1)
+    hh = negf%hcublas
+    if (gpu .eq. .true.) then
+       write(*,*) '~-~-~-~-',nome,' check convergence GPU: ~-~-~-~-'     
+       call sum_gpu(hh, T(1,1)%val, summ)
+       write(*,*) '       ',nome,'(',1,1,')=', summ
+
+       do i= 2,nbl-1
+          call sum_gpu(hh, T(i,i)%val, summ)
+          write(*,*) '       ',nome,'(',i,i,')=', summ
+          call sum_gpu(hh, T(i-1,i)%val, summ)
+          write(*,*) '       ',nome,'(',i-1,i,')=', summ
+          call sum_gpu(hh, T(i,i-1)%val, summ)
+          write(*,*) '       ',nome,'(',i,i-1,')=', summ
+       end do
+       write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
+    else
+       write(*,*) '~-~-~-~-',nome,' check convergence CPU: ~-~-~-~-'     
+       write(*,*) '       ',nome,'(',1,1,')=', sum(ABS(T(1,1)%val))
+
+       do i= 2,nbl-1
+          write(*,*) '       ',nome,'(',i,i,')=', sum(ABS(T(i,i)%val))
+          
+          write(*,*) '       ',nome,'(',i-1,i,')=', sum(ABS(T(i-1,i)%val))
+          
+          write(*,*) '       ',nome,'(',i,i-1,')=', sum(ABS(T(i,i-1)%val))
+       end do
+       write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
+    endif     
+  end subroutine check_convergence_trid
+
+  subroutine check_convergence_vec(negf,T,nome,gpu)
+    type(Tnegf), intent(in) :: negf      
+    type(z_DNS), dimension(:), intent(in) :: T
+    character(4), intent(in) :: nome
+    logical, intent(in) :: gpu
+
+    integer :: nbl, i
+    type(CublasHandle) :: hh   
+    real(dp) :: summ 
+
+    nbl = size(T)
+    hh = negf%hcublas
+    if (gpu .eq. .true.) then
+       write(*,*) '~-~-~-~-',nome,' check convergence GPU: ~-~-~-~-'     
+
+       do i= 2,nbl
+          call sum_gpu(hh, T(i)%val, summ)
+          write(*,*) '       ',nome,'(',i,')=', summ
+       end do
+       write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
+    else 
+       write(*,*) '~-~-~-~-',nome,' check convergence CPU: ~-~-~-~-'     
+
+       do i= 2,nbl
+          write(*,*) '       ',nome,'(',i,')=', sum(ABS(T(i)%val))
+       end do
+       write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
+    endif
+            
+  end subroutine check_convergence_vec
 
   subroutine calculate_Gn_tridiag_blocks_sp(negf, ESH, SelfEneR, frm, ref, struct, gsml, gsmr, Gr, Gn) 
     !In/Out
@@ -533,9 +608,9 @@ contains
     integer :: i,j
     integer :: cb, nbl, ncont, istat
     complex(sp) :: frmdiff
-    complex(sp), parameter :: one = (1.0, 0.0)
-    complex(sp), parameter :: mone = (-1.0, 0.0)
-    complex(sp), parameter :: zero = (0.0, 0.0)
+    complex(sp), parameter :: one = (1.0_sp, 0.0_sp)
+    complex(sp), parameter :: mone = (-1.0_sp, 0.0_sp)
+    complex(sp), parameter :: zero = (0.0_sp, 0.0_sp)
     real(sp) :: somma
 
     ncont = struct%num_conts
@@ -659,9 +734,9 @@ contains
     integer :: i, j, istat
     integer :: cb, nbl, ncont
     complex(dp) :: frmdiff
-    complex(dp), parameter :: one = (1.0, 0.0)
-    complex(dp), parameter :: mone = (-1.0, 0.0)
-    complex(dp), parameter :: zero = (0.0, 0.0)
+    complex(dp), parameter :: one = (1.0_dp, 0.0_dp)
+    complex(dp), parameter :: mone = (-1.0_dp, 0.0_dp)
+    complex(dp), parameter :: zero = (0.0_dp, 0.0_dp)
     real(dp) :: somma
 
     ncont = struct%num_conts
@@ -782,15 +857,15 @@ contains
     Integer :: ct1, bl1
     logical, dimension(:), allocatable :: tun_mask
     Type(c_DNS) :: work1, work2, GAM1_dns, GA, TRS, AA
-    complex(sp), parameter :: j = (0.0,1.0)  ! CMPX unity
-    complex(sp), parameter :: mj = (0.0,-1.0) 
-    complex(sp), parameter :: one = (1.0, 0.0)
-    complex(sp), parameter :: mone = (-1.0, 0.0)
-    complex(sp), parameter :: zero = (0.0, 0.0)
+    complex(sp), parameter :: j = (0.0_sp,1.0_sp)  ! CMPX unity
+    complex(sp), parameter :: mj = (0.0_sp,-1.0_sp) 
+    complex(sp), parameter :: one = (1.0_sp, 0.0_sp)
+    complex(sp), parameter :: mone = (-1.0_sp, 0.0_sp)
+    complex(sp), parameter :: zero = (0.0_sp, 0.0_sp)
 
     if (size(cblk).gt.2) then
        write(*,*) "ERROR: calculate_single_transmission_2_contacts is valid only for 2 contacts"
-       TUN = 0.0_dp
+       TUN = 0.0_sp
        return
     endif
 
@@ -863,11 +938,11 @@ contains
     Integer :: ct1, bl1
     logical, dimension(:), allocatable :: tun_mask
     Type(z_DNS) :: work1, work2, GAM1_dns, GA, TRS, AA
-    complex(dp), parameter ::    j = (0.0,1.0)  ! CMPX unity
-    complex(dp), parameter ::    mj = (0.0,-1.0)  
-    complex(dp), parameter :: one = (1.0, 0.0)
-    complex(dp), parameter :: mone = (-1.0, 0.0)
-    complex(dp), parameter :: zero = (0.0, 0.0)
+    complex(dp), parameter ::    j = (0.0_dp,1.0_dp)  ! CMPX unity
+    complex(dp), parameter ::    mj = (0.0_dp,-1.0_dp)  
+    complex(dp), parameter :: one = (1.0_dp, 0.0_dp)
+    complex(dp), parameter :: mone = (-1.0_dp, 0.0_dp)
+    complex(dp), parameter :: zero = (0.0_dp, 0.0_dp)
 
     if (size(cblk).gt.2) then
        write(*,*) "ERROR: calculate_single_transmission_2_contacts is valid only for 2 contacts"
@@ -947,9 +1022,9 @@ contains
     logical, dimension(:), allocatable :: tun_mask
     Type(c_DNS) :: work1, work2, GAM1_dns, GAM2_dns, GA, TRS
     Real(sp) :: max
-    complex(sp), parameter :: one = (1.0, 0.0)
-    complex(sp), parameter :: mone = (-1.0, 0.0)
-    complex(sp), parameter :: zero = (0.0, 0.0)
+    complex(sp), parameter :: one = (1.0_sp, 0.0_sp)
+    complex(sp), parameter :: mone = (-1.0_sp, 0.0_sp)
+    complex(sp), parameter :: zero = (0.0_sp, 0.0_sp)
 
     !Arrange contacts in way that order between first and second is always the
     !same (always ct1 < ct2)
@@ -984,7 +1059,7 @@ contains
           endif
 
           !Checks whether block has been created, if not do it
-          if (.not.allocated(Gr(i,bl1)%val)) then  !PROBLEMA QUI
+          if (.not.allocated(Gr(i,bl1)%val)) then  
 
              call createAll(work1, gsmr(i)%nrow, ESH(i,i-1)%ncol)
              call createAll(Gr(i,bl1), work1%nrow, Gr(i-1,bl1)%ncol)
@@ -1015,24 +1090,22 @@ contains
     call destroyAll(work1)
     call destroyAll(GAM1_dns)
 
-    call createAll(GA, Gr(bl2,bl1)%nrow, Gr(bl2,bl1)%ncol)
-    call dagger_gpu(Gr(bl2,bl1),GA)
+    call createAll(TRS, work2%nrow, Gr(bl2,bl1)%nrow)
+    call matmul_gpu_dag(hh, one, work2%val, Gr(bl2,bl1)%val, zero, TRS%val)
+    call destroyAll(work2)
 
     if (bl2.gt.bl1+1) call destroyAll(Gr(bl2,bl1))
-
-    call createAll(TRS, work2%nrow, GA%ncol)
-    call matmul_gpu(hh, one, work2%val, GA%val, zero, TRS%val)
-    call destroyAll(work2)
-    call destroyAll(GA)
 
     call get_tun_mask(ESH, bl2, tun_proj, tun_mask)
     call copyToGPU(tun_mask)
 
     TUN = abs(real(trace_gpu(TRS, tun_mask)))
+    write(*,*) 'N_conts: TUN=', TUN 
     call deleteGPU(tun_mask) 
     call log_deallocate(tun_mask)
 
     call destroyAll(TRS)
+
   end subroutine calculate_single_transmission_N_contacts_sp
 
   subroutine calculate_single_transmission_N_contacts_dp(negf,ni,nf,ESH,SelfEneR,cblk,tun_proj,gsmr,Gr,TUN)
@@ -1052,9 +1125,9 @@ contains
     logical, dimension(:), allocatable :: tun_mask
     Type(z_DNS) :: work1, work2, GAM1_dns, GAM2_dns, GA, TRS
     real(dp) :: max, summ
-    complex(dp), parameter :: one = (1.0, 0.0)
-    complex(dp), parameter :: mone = (-1.0, 0.0)
-    complex(dp), parameter :: zero = (0.0, 0.0)
+    complex(dp), parameter :: one = (1.0_dp, 0.0_dp)
+    complex(dp), parameter :: mone = (-1.0_dp, 0.0_dp)
+    complex(dp), parameter :: zero = (0.0_dp, 0.0_dp)
 
     !Arrange contacts in way that order between first and second is always the
     !same (always ct1 < ct2)
@@ -1077,7 +1150,7 @@ contains
           !If so next block is also null => TUN = 0
           call copyFromGPU(Gr(i-1,bl1))
           max=maxval(abs(Gr(i-1,bl1)%val))
-
+          
           if (max.lt.EPS) then
              TUN = EPS*EPS !for log plots
              !Destroy also the block adjecent to diagonal since
@@ -1087,7 +1160,7 @@ contains
           endif
 
           !Checks whether block has been created, if not do it
-          if (.not.allocated(Gr(i,bl1)%val)) then  !PROBLEMA QUI
+          if (.not.allocated(Gr(i,bl1)%val)) then  
 
              call createAll(work1, gsmr(i)%nrow, ESH(i,i-1)%ncol)
              call createAll(Gr(i,bl1), work1%nrow, Gr(i-1,bl1)%ncol)
@@ -1108,31 +1181,58 @@ contains
     call spectral_gpu(SelfEneR(ct1),GAM1_dns)
     call spectral_gpu(SelfEneR(ct2),GAM2_dns)
 
-    ! Work to compute transmission matrix (Gamma2 Gr Gamma1 Ga)
-    call createAll(work1, GAM2_dns%nrow, Gr(bl2,bl1)%ncol)
-    call matmul_gpu(hh, one, GAM2_dns%val, Gr(bl2,bl1)%val, zero, work1%val)
-    call destroyAll(GAM2_dns)
+        write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-'
+        write(*,*) 'N_conts: TRS= GAM2 * Gr(bl2,bl1)* GAM1 * Gr(bl2,bl1)^+'
+        call sum_gpu(hh, GAM1_dns%val, summ)
+        write(*,*) 'N_conts: sum_GAM1_dns=', summ
+        call sum_gpu(hh, GAM2_dns%val, summ)
+        write(*,*) 'N_conts: sum_GAM2_dns=', summ
+        call sum_gpu(hh, Gr(bl2,bl1)%val, summ)
+        write(*,*) 'N_conts: sum_Gr(',bl2,bl1,')=', summ
+        write(*,*) ''
 
-    call createAll(work2, work1%nrow, GAM1_dns%ncol)
-    call matmul_gpu(hh, one, work1%val, GAM1_dns%val, zero, work2%val)
+    ! Work to compute transmission matrix (Gamma2 Gr Gamma1 Ga)
+    write(*,*) ''
+    write(*,*) 'Gr(bl2,bl1)%nrow=', Gr(bl2,bl1)%nrow
+    write(*,*) 'Gr(bl2,bl1)%ncol=', Gr(bl2,bl1)%ncol
+    write(*,*) 'GAM1_dns%nrow=', GAM1_dns%nrow
+    write(*,*) 'GAM1_dns%ncol=', GAM1_dns%ncol
+    write(*,*) 'GAM2_dns%nrow=', GAM2_dns%nrow
+    write(*,*) 'GAM2_dns%ncol=', GAM2_dns%ncol
+    write(*,*) ''
+    call createAll(work1, Gr(bl2,bl1)%nrow, GAM1_dns%ncol)
+    call matmul_gpu(hh, one, Gr(bl2,bl1)%val, GAM1_dns%val, zero, work1%val)
+
+    call createAll(work2, GAM2_dns%nrow, work1%ncol)
+    call matmul_gpu(hh, one, GAM2_dns%val, work1%val, zero, work2%val)
+        call sum_gpu(hh, work1%val, summ)
+        write(*,*) 'N_conts: sum_work1=', summ
+        call sum_gpu(hh, GAM2_dns%val, summ)
+        write(*,*) 'N_conts: sum_GAM2_dns=', summ
+        call sum_gpu(hh, work2%val, summ)
+        write(*,*) 'N_conts: sum_work2=', summ
+
     call destroyAll(work1)
+    call destroyAll(GAM2_dns)
     call destroyAll(GAM1_dns)
 
-    call createAll(GA, Gr(bl2,bl1)%nrow, Gr(bl2,bl1)%ncol)
-    call dagger_gpu(Gr(bl2,bl1),GA)
+    call createAll(TRS, work2%nrow, Gr(bl2,bl1)%nrow)
+    call matmul_gpu_dag(hh, one, work2%val, Gr(bl2,bl1)%val, zero, TRS%val)
+    call destroyAll(work2)
 
     if (bl2.gt.bl1+1) call destroyAll(Gr(bl2,bl1))
 
-    call createAll(TRS, work2%nrow, GA%ncol)
-    call matmul_gpu(hh, one, work2%val, GA%val, zero, TRS%val)
-    call destroyAll(work2)
-    call destroyAll(GA)
-
     call get_tun_mask(ESH, bl2, tun_proj, tun_mask)
     call copyToGPU(tun_mask)
-
+        call copyFromGPU(TRS)
+        write(*,*) 'N_conts: sum_TRS_cpu=', sum(ABS(TRS%val))
     TUN = abs(real(trace_gpu(TRS, tun_mask)))
-    write(*,*) 'N_conts: TUN=', TUN 
+    !TUN = abs(real(trace(TRS, tun_mask)))
+        write(*,*) 'N_conts: TUN= abs(real(trace(TRS)))'
+        call sum_gpu(hh, TRS%val, summ)
+        write(*,*) 'N_conts: sum_TRS_gpu=', summ
+        write(*,*) 'N_conts: TUN=', TUN
+        write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-' 
     call deleteGPU(tun_mask) 
     call log_deallocate(tun_mask)
 

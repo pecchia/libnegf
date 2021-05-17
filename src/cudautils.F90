@@ -37,10 +37,14 @@ module cudautils
   public :: trace_gpu
 
   interface copyToGPU
-     module procedure copyToGPU_dns_sp,  copyToGPU_comp_vec_sp 
-     module procedure copyToGPU_dns_dp,  copyToGPU_comp_vec_dp
-     module procedure copyToGPU_real_sp, copyToGPU_real_dp
-     module procedure copyToGPU_comp_sp, copyToGPU_comp_dp
+     module procedure copyToGPU_dns_sp
+     module procedure copyToGPU_dns_dp
+     module procedure copyToGPU_comp_vec_sp 
+     module procedure copyToGPU_comp_vec_dp
+     module procedure copyToGPU_real_sp
+     module procedure copyToGPU_real_dp
+     module procedure copyToGPU_comp_sp
+     module procedure copyToGPU_comp_dp
      module procedure copyToGPU_logic_vec
   end interface copyToGPU
 
@@ -50,8 +54,10 @@ module cudautils
   end interface createGPU
 
   interface copyFromGPU
-     module procedure copyFromGPU_dns_sp, copyFromGPU_real_sp
-     module procedure copyFromGPU_dns_dp, copyFromGPU_real_dp
+     module procedure copyFromGPU_dns_sp
+     module procedure copyFromGPU_dns_dp
+     module procedure copyFromGPU_real_sp
+     module procedure copyFromGPU_real_dp
   end interface copyFromGPU
 
   interface deleteGPU
@@ -380,10 +386,15 @@ contains
     complex(dp), intent(in) :: beta     
     complex(dp), intent(inout) :: C(:,:)      
 
+    real(dp) :: summ
     integer :: istat, m,n,k
     m = size(A,1)
     k = size(B,1)
     n = size(C,2)
+    call sum_gpu(hcublas, A, summ)
+    write(*,*) 'matmul_gpu: sum_A = ', summ 
+    call sum_gpu(hcublas, B, summ)
+    write(*,*) 'matmul_gpu: sum_B = ', summ 
     !$acc data present(A, B, C)
     !$acc host_data use_device(A, B, C)
     istat = cublasZgemm(hcublas, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k, &
@@ -450,6 +461,7 @@ contains
 
     !$acc data present(Mat)
     !$acc host_data use_device(Mat)
+    summ = 0.0_sp
     istat=cublasScasum(hcublas, n*n, Mat, 1, summ)
     !$acc end host_data
     !$acc end data
@@ -464,9 +476,9 @@ contains
     integer :: istat, n
 
     n=size(Mat,1)
-
     !$acc data present(Mat)
     !$acc host_data use_device(Mat)
+    summ = 0.0_dp
     istat=cublasDzasum(hcublas, n*n, Mat, 1, summ)
     !$acc end host_data
     !$acc end data
@@ -773,7 +785,7 @@ contains
     nrow = size(A%val,1)
     ncol = size(A%val,2)
 
-    !$acc kernels present(Gr, A)
+    !$acc kernels present(Gr%val, A)
     do jj = 1, ncol 
        do kk = 1, nrow 
           A%val(kk,jj) = conjg(Gr%val(jj,kk))
@@ -851,11 +863,16 @@ contains
     integer :: ii, nbl
 
     nbl = size(M,1)
-    call copyToGPU(M(1,1))
+    !call copyToGPU(M(1,1))
+    !$acc enter data copyin(M(1,1)%val)
     do ii=2,nbl
-       call copyToGPU(M(ii,ii))
-       call copyToGPU(M(ii-1,ii))
-       call copyToGPU(M(ii,ii-1))
+    !$acc enter data copyin(M(ii,ii)%val)
+    !$acc enter data copyin(M(ii-1,ii)%val)
+    !$acc enter data copyin(M(ii,ii-1)%val)
+
+    !   call copyToGPU(M(ii,ii))
+    !   call copyToGPU(M(ii-1,ii))
+    !   call copyToGPU(M(ii,ii-1))
     end do
   end subroutine copy_trid_toGPU_dp
   ! ------------------------------------------------------------------
