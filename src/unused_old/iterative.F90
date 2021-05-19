@@ -153,14 +153,10 @@ CONTAINS
     !! Add interaction self energy contribution, if any
     if (allocated(negf%inter)) call negf%inter%add_sigma_r(ESH)
 #:if defined("GPU")
-    call check_convergence_trid(negf,ESH,'ESH',.false.)
     call copy_trid_toGPU(ESH)
-    call check_convergence_trid(negf,ESH,'ESH',.true.)
 #:endif
     call allocate_gsm(gsmr,nbl)
     call calculate_gsmr_blocks(negf,ESH,nbl,2,gsmr)
-
-    call check_convergence_vec(negf,gsmr,'gsmr',.true.)
 
     call allocate_blk_dns(Gr,nbl)
 
@@ -168,9 +164,7 @@ CONTAINS
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,2,nbl)
 
 #:if defined("GPU")
-    call check_convergence_trid(negf,Gr,'Gr ',.true.)
     call copy_trid_toHOST(Gr) 
-    call check_convergence_trid(negf,Gr,'Gr ',.false.)
 #:endif
     call destroy_ESH(ESH)
     call deallocate_blk_dns(ESH)
@@ -288,7 +282,6 @@ CONTAINS
 
 #:if defined("GPU")
       call copy_trid_toGPU(ESH)
-      call check_convergence_trid(negf,ESH,'ESH',.true.)
       call copy_vdns_toGPU(SelfEneR)
 #:endif
 
@@ -322,7 +315,6 @@ CONTAINS
       call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,rbl-1,1)
 
 #:if defined("GPU")
-      call check_convergence_trid(negf,Gr,'Gr ',.true.)
       call copy_trid_toHOST(Gr) 
 #:endif
 
@@ -368,7 +360,6 @@ CONTAINS
       call calculate_Gn_tridiag_blocks(negf,ESH,SelfEneR,frm,ref,negf%str,gsml,gsmr,Gr,Gn)
 
 #:if defined("GPU")
-      call check_convergence_trid(negf,Gn,'Gn ',.true.)
       call copy_trid_toHOST(Gn) 
 #:endif
 
@@ -3044,8 +3035,10 @@ CONTAINS
     endif
 
 #:if defined("GPU")
+    write(*,*) 'transmissions: about to copy SE and ESH on GPU'
     call copy_trid_toGPU(ESH)
     call copy_vdns_toGPU(SelfEneR)
+    write(*,*) 'transmissions: copied SE and ESH on GPU'
 #:endif
 
     ! Fall here when there are 2 contacts for fast transmission
@@ -3054,8 +3047,12 @@ CONTAINS
        call calculate_gsmr_blocks(negf,ESH,nbl,2,gsmr,.false.)
        call allocate_blk_dns(Gr,nbl)
        call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,1)
-       
+       !#:if defined("GPU")
+       !       call copy_trid_toHOST(Gr) 
+       !#:endif
+       write(*,*) 'transmissions: about to call 2 conts'
        call calculate_single_transmission_2_contacts(negf,nit,nft,ESH,SelfEneR,str%cblk,tun_proj,Gr,tun)
+       write(*,*) 'transmissions: called 2 conts'
        tun_mat(1) = tun
 
     else
@@ -3093,7 +3090,9 @@ CONTAINS
              endif
           endif
 
+          write(*,*) 'transmissions: about to call N conts'
           call calculate_single_transmission_N_contacts(negf,nit,nft,ESH,SelfEneR,str%cblk,tun_proj,gsmr,Gr,tun)
+          write(*,*) 'transmissions: called N conts'
           tun_mat(icpl) = tun
 
        end do
@@ -3167,10 +3166,13 @@ CONTAINS
     do i=1,ncont
        ESH(str%cblk(i),str%cblk(i))%val = ESH(str%cblk(i),str%cblk(i))%val-SelfEneR(i)%val
     end do
-    write(*,*) 'Routine: trans_and_dos'
+
 #:if defined("GPU")
+    write(*,*) 'trans_and_dos: about to copy ESH'
     call copy_trid_toGPU(ESH)
+    write(*,*) 'trans_and_dos: copied ESH on GPU'
     call copy_vdns_toGPU(SelfEneR)
+    write(*,*) 'trans_and_dos: copied SE on GPU'
 #:endif
 
     call allocate_gsm(gsmr,nbl)
@@ -3180,7 +3182,6 @@ CONTAINS
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,1)
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,2,nbl)
     !Computation of transmission(s) between contacts ni(:) -> nf(:)
-    write(*,*) 'Gr computed'
     do icpl=1,size(ni)
 
        nit=ni(icpl)
@@ -3190,9 +3191,13 @@ CONTAINS
        case(1)
           tun = 0.0_dp
        case(2)
+          write(*,*) 'trans_and_dos: about to call 2_conts'
           call calculate_single_transmission_2_contacts(negf,nit,nft,ESH,SelfEneR,str%cblk,tun_proj,Gr,tun)
+          write(*,*) 'trans_and_dos: called 2_conts'
        case default
+          write(*,*) 'trans_and_dos: about to call N_conts'
           call calculate_single_transmission_N_contacts(negf,nit,nft,ESH,SelfEneR,str%cblk,tun_proj,gsmr,Gr,tun)
+          write(*,*) 'trans_and_dos: called N_conts'
        end select
        TUN_MAT(icpl) = tun
 
@@ -3204,9 +3209,7 @@ CONTAINS
 
     !Distruzione dei blocchi fuori-diagonale
 #:if defined("GPU")    
-    write(*,*) 'Gr to be copied to host'
     call copy_trid_toHOST(Gr) 
-    write(*,*) 'Gr copied to host'
     do i=2,nbl
       call destroyAll(Gr(i-1,i))
       call destroyAll(Gr(i,i-1))
@@ -3225,9 +3228,9 @@ CONTAINS
     Grm%rowpnt(:)=1
 
 #:if defined("GPU")
-    write(*,*) 'SE to be deleted'
+    write(*,*) 'trans_and_dos: about to delete SE'
     call delete_vdns_fromGPU(SelfEneR)
-    write(*,*) 'SE deleted'
+    write(*,*) 'trans_and_dos: deleted SE'
     do i=1,nbl
        call create(GrCSR,Gr(i,i)%nrow,Gr(i,i)%ncol,Gr(i,i)%nrow*Gr(i,i)%ncol)
        call dns2csr(Gr(i,i),GrCSR)
