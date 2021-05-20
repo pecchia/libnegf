@@ -11,6 +11,7 @@ module iterative_gpu
   use cudautils
   use cublas_v2
   use cusolverDn
+  use, intrinsic :: ieee_arithmetic
 
   implicit none
   private 
@@ -527,35 +528,36 @@ contains
     integer :: nbl, i
     type(CublasHandle) :: hh   
     real(dp) :: summ 
+    character(1) :: ci, cim1
 
     nbl = size(T,1)
     hh = negf%hcublas
     if (gpu .eq. .true.) then
-       write(*,*) '~-~-~-~-',nome,' check convergence GPU: ~-~-~-~-'     
-       call sum_gpu(hh, T(1,1)%val, summ)
-       write(*,*) '       ',nome,'(',1,1,')=', summ
+       !write(*,*) '~-~-~-~-',nome,' check convergence GPU: ~-~-~-~-'     
+       call checksum(hh, T(1,1)%val, nome//'(1,1)')
 
-       do i= 2,nbl
-          call sum_gpu(hh, T(i,i)%val, summ)
-          write(*,*) '       ',nome,'(',i,i,')=', summ
-          call sum_gpu(hh, T(i-1,i)%val, summ)
-          write(*,*) '       ',nome,'(',i-1,i,')=', summ
-          call sum_gpu(hh, T(i,i-1)%val, summ)
-          write(*,*) '       ',nome,'(',i,i-1,')=', summ
+       do i= 2,nbl-1
+          write(ci,'(i1)') i
+          write(cim1,'(i1)') i-1
+          call checksum(hh, T(i,i)%val, nome//'('//ci//','//ci//')')
+          call checksum(hh, T(i-1,i)%val, nome//'('//cim1//','//ci//')')
+          call checksum(hh, T(i,i-1)%val, nome//'('//ci//','//cim1//')')
        end do
-       write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
+       !write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
     else
-       write(*,*) '~-~-~-~-',nome,' check convergence CPU: ~-~-~-~-'     
-       write(*,*) '       ',nome,'(',1,1,')=', sum(ABS(T(1,1)%val))
+       !write(*,*) '~-~-~-~-',nome,' check convergence CPU: ~-~-~-~-'    
+       summ = sum(ABS(T(1,1)%val)) 
+       if (ieee_is_nan(summ)) write(*,*) 'CPU:   ',nome,'(',1,1,')=', summ
 
-       do i= 2,nbl
-          write(*,*) '       ',nome,'(',i,i,')=', sum(ABS(T(i,i)%val))
-          
-          write(*,*) '       ',nome,'(',i-1,i,')=', sum(ABS(T(i-1,i)%val))
-          
-          write(*,*) '       ',nome,'(',i,i-1,')=', sum(ABS(T(i,i-1)%val))
+       do i= 2,nbl-1
+          summ = sum(ABS(T(i,i)%val)) 
+          if (ieee_is_nan(summ)) write(*,*) 'CPU:   ',nome,'(',i,i,')=', summ
+          summ = sum(ABS(T(i-1,i)%val)) 
+          if (ieee_is_nan(summ)) write(*,*) 'CPU:   ',nome,'(',i-1,i,')=', summ
+          summ = sum(ABS(T(i,i-1)%val)) 
+          if (ieee_is_nan(summ)) write(*,*) 'CPU:   ',nome,'(',i,i-1,')=', summ
        end do
-       write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
+       !write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
     endif     
   end subroutine check_convergence_trid
 
@@ -568,24 +570,26 @@ contains
     integer :: nbl, i
     type(CublasHandle) :: hh   
     real(dp) :: summ 
+    character(1) :: ci
 
     nbl = size(T)
     hh = negf%hcublas
     if (gpu .eq. .true.) then
-       write(*,*) '~-~-~-~-',nome,' check convergence GPU: ~-~-~-~-'     
+       !write(*,*) '~-~-~-~-',nome,' check convergence GPU: ~-~-~-~-'     
 
        do i= 2,nbl
-          call sum_gpu(hh, T(i)%val, summ)
-          write(*,*) '       ',nome,'(',i,')=', summ
+          write(ci,'(i1)') i
+          call checksum(hh, T(i)%val, nome//'('//ci//')')
        end do
-       write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
+       !write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
     else 
-       write(*,*) '~-~-~-~-',nome,' check convergence CPU: ~-~-~-~-'     
+       !write(*,*) '~-~-~-~-',nome,' check convergence CPU: ~-~-~-~-'     
 
        do i= 2,nbl
-          write(*,*) '       ',nome,'(',i,')=', sum(ABS(T(i)%val))
+          summ = sum(ABS(T(i)%val))
+          if (ieee_is_nan(summ)) write(*,*) 'CPU:   ',nome,'(',i,')=', summ
        end do
-       write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
+       !write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
     endif
             
   end subroutine check_convergence_vec

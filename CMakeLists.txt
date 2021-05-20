@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(libNEGF VERSION 1.0 LANGUAGES Fortran C)
+project(libNEGF VERSION 1.0.3 LANGUAGES Fortran C)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 include(externalMpifx)
@@ -11,6 +11,11 @@ find_program(FYPP "fypp")
 
 option(WITH_MPI "Whether MPI-parallelised library should be built" FALSE)
 message(STATUS "libNEGF WITH_MPI: " ${WITH_MPI})
+
+#option(WITH_GPU "" TRUE)
+
+option(WITH_TRANSPORT_GPU "" FALSE)
+message(STATUS "libNEGF WITH_GPU: " ${WITH_TRANSPORT_GPU})
 
 # Note, this option does not work yet, so leave it to false
 option(WITH_INELASTIC "Whether to build with inelastic scattering" FALSE)
@@ -61,6 +66,10 @@ if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
 
+# This is till not working as it should
+#if(WITH_TRANSPORT_GPU)
+#  find_package(CUDAToolkit REQUIRED)	
+#endif()	
 
 #
 # Installation

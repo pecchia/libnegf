@@ -4,6 +4,7 @@ module cudautils
   use cublas_v2
   use cusolverDn
   use mat_def
+  use, intrinsic :: ieee_arithmetic
   implicit none
   private
   public :: createGPU
@@ -35,6 +36,8 @@ module cudautils
   public :: spectral_gpu
   public :: dagger_gpu
   public :: trace_gpu
+
+  public :: checksum
 
   interface copyToGPU
      module procedure copyToGPU_dns_sp
@@ -386,15 +389,12 @@ contains
     complex(dp), intent(in) :: beta     
     complex(dp), intent(inout) :: C(:,:)      
 
-    real(dp) :: summ
     integer :: istat, m,n,k
     m = size(A,1)
     k = size(B,1)
     n = size(C,2)
-    !   call sum_gpu(hcublas, A, summ)
-    !   write(*,*) 'matmul_gpu: sum_A = ', summ 
-    !   call sum_gpu(hcublas, B, summ)
-    !   write(*,*) 'matmul_gpu: sum_B = ', summ 
+    call checksum(hcublas,A,'A')
+    call checksum(hcublas,B,'B')
     !$acc data present(A, B, C)
     !$acc host_data use_device(A, B, C)
     istat = cublasZgemm(hcublas, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k, &
@@ -441,6 +441,8 @@ contains
     m = size(A,1)
     k = size(B,1)
     n = size(C,2)
+    call checksum(hcublas,A,'A')
+    call checksum(hcublas,B,'B')
     !$acc data present(A, B, C)
     !$acc host_data use_device(A, B, C)
     istat = cublasZgemm(hcublas, CUBLAS_OP_N, CUBLAS_OP_C, m, n, k, &
@@ -1029,5 +1031,21 @@ contains
        !$acc end kernels
     end if
   end function trace_gpu_dp
+
+  ! ----------------------------------------------------------------
+  subroutine checksum(hcublas, A, nome)
+    type(cublasHandle), intent(in) :: hcublas
+    complex(dp), intent(in) :: A(:,:)      
+    character(*), intent(in) :: nome
+
+    real(dp) :: summ
+
+    call sum_gpu(hcublas, A, summ)
+
+    if (ieee_is_nan(summ)) then
+       write(*,*) 'GPU:   ',trim(nome),summ
+    end if
+
+  end subroutine checksum
 
 end module cudautils

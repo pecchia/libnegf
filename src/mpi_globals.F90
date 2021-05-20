@@ -75,19 +75,17 @@ module mpi_globals
       nE = inComm%size/nk
       dims(1)=nk; dims(2)=nE
       call mpifx_barrier(inComm, mpierr) 
-!print*,'MPI_CART_CREATE'
+
       call MPI_CART_CREATE(inComm%id, ndims, dims, periods, reorder, outComm, mpierr)
       call cartComm%init(outComm, mpierr)
       call mpifx_barrier(inComm, mpierr) 
 
       remain_dims = (/0, 1/)
-!print*,'MPI_CART_SUB E'
       call MPI_CART_SUB(cartComm%id, remain_dims, outComm, mpierr)
       call energyComm%init(outComm, mpierr)
       call mpifx_barrier(inComm, mpierr) 
 
       remain_dims = (/1, 0/)
-!print*,'MPI_CART_SUB K'
       call MPI_CART_SUB(cartComm%id, remain_dims, outComm, mpierr)
       call kComm%init(outComm, mpierr)
       call mpifx_barrier(inComm, mpierr) 

@@ -86,6 +86,10 @@ if(WITH_MPI)
   target_link_libraries(negf PUBLIC MpiFx::MpiFx)
 endif()
 target_link_libraries(negf PRIVATE ${BLAS_LIBRARIES} ${LAPACK_LIBRARIES})
+# Better way to introduce library dependence
+#if(WITH_TRANSPORT_GPU)
+#  target_link_libraries(negf PRIVATE CUDA::cusolver)
+#endif()  
 
 target_include_directories(negf PUBLIC
   $<BUILD_INTERFACE:${BUILD_MOD_DIR}>
