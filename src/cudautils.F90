@@ -183,23 +183,23 @@ contains
 
   subroutine createGPU_sp(A)
     type(c_DNS), intent(in) :: A     
-    !$acc enter data create(A,A%val)
+    !$acc enter data create(A%val)
   end subroutine createGPU_sp
 
   subroutine createGPU_dp(A)
     type(z_DNS), intent(in) :: A     
-    !$acc enter data create(A,A%val)
+    !$acc enter data create(A%val)
   end subroutine createGPU_dp
   ! ------------------------------------------------------------------
 
   subroutine copyToGPU_dns_sp(A)
     type(c_DNS), intent(in) :: A     
-    !$acc enter data copyin(A,A%val)
+    !$acc enter data copyin(A%val)
   end subroutine copyToGPU_dns_sp
 
   subroutine copyToGPU_dns_dp(A)
     type(z_DNS), intent(in) :: A     
-    !$acc enter data copyin(A,A%val)
+    !$acc enter data copyin(A%val)
   end subroutine copyToGPU_dns_dp
 
   subroutine copyToGPU_comp_vec_sp(V)
@@ -262,12 +262,12 @@ contains
 
   subroutine deleteGPU_dns_sp(A)
     type(c_DNS), intent(inout) :: A     
-    !$acc exit data delete(A%val,A)
+    !$acc exit data delete(A%val)
   end subroutine deleteGPU_dns_sp
 
   subroutine deleteGPU_dns_dp(A)
     type(z_DNS), intent(inout) :: A     
-    !$acc exit data delete(A%val,A)
+    !$acc exit data delete(A%val)
   end subroutine deleteGPU_dns_dp
 
    subroutine deleteGPU_logic_vec(V)
@@ -391,10 +391,10 @@ contains
     m = size(A,1)
     k = size(B,1)
     n = size(C,2)
-    call sum_gpu(hcublas, A, summ)
-    write(*,*) 'matmul_gpu: sum_A = ', summ 
-    call sum_gpu(hcublas, B, summ)
-    write(*,*) 'matmul_gpu: sum_B = ', summ 
+    !   call sum_gpu(hcublas, A, summ)
+    !   write(*,*) 'matmul_gpu: sum_A = ', summ 
+    !   call sum_gpu(hcublas, B, summ)
+    !   write(*,*) 'matmul_gpu: sum_B = ', summ 
     !$acc data present(A, B, C)
     !$acc host_data use_device(A, B, C)
     istat = cublasZgemm(hcublas, CUBLAS_OP_N, CUBLAS_OP_N, m, n, k, &
@@ -678,19 +678,19 @@ contains
 
   subroutine ccadd_gpu_sp(alpha, A, beta,B, C)
     !C = alpha*A + beta*B      
-    type(c_DNS), intent(in) :: A      
-    type(c_DNS), intent(in) :: B 
+    complex(sp), dimension(:,:), intent(in) :: A      
+    complex(sp), dimension(:,:), intent(in) :: B 
     complex(sp) :: alpha, beta
-    type(c_DNS), intent(inout) :: C      
+    complex(sp), dimension(:,:), intent(inout) :: C      
 
     integer :: ii, jj, nrow, ncol
-    nrow = size(A%val,1)
-    ncol = size(A%val,2)
+    nrow = size(A,1)
+    ncol = size(A,2)
 
     !$acc kernels present(A, B, C)
     do jj = 1, ncol 
        do ii = 1, nrow 
-          C%val(ii,jj) = alpha*A%val(ii,jj) + beta*B%val(ii,jj)
+          C(ii,jj) = alpha*A(ii,jj) + beta*B(ii,jj)
        end do
     end do
     !$acc end kernels
@@ -699,19 +699,19 @@ contains
 
   subroutine ccadd_gpu_dp(alpha, A, beta,B, C)
     !C = alpha*A + beta*B      
-    type(z_DNS), intent(in) :: A      
-    type(z_DNS), intent(in) :: B 
+    complex(dp), dimension(:,:), intent(in) :: A      
+    complex(dp), dimension(:,:), intent(in) :: B 
     complex(dp) :: alpha, beta
-    type(z_DNS), intent(inout) :: C      
+    complex(dp), dimension(:,:), intent(inout) :: C      
 
     integer :: ii, jj, nrow, ncol
-    nrow = size(A%val,1)
-    ncol = size(A%val,2)
+    nrow = size(A,1)
+    ncol = size(A,2)
 
     !$acc kernels present(A, B, C)
     do jj = 1, ncol 
        do ii = 1, nrow 
-          C%val(ii,jj) = alpha*A%val(ii,jj) + beta*B%val(ii,jj)
+          C(ii,jj) = alpha*A(ii,jj) + beta*B(ii,jj)
        end do
     end do
     !$acc end kernels
@@ -720,19 +720,19 @@ contains
 
 
   subroutine spectral_gpu_sp(Gr, A)
-    type(c_DNS), intent(in) :: Gr            
-    type(c_DNS), intent(inout) :: A      
+    complex(sp), dimension(:,:), intent(in) :: Gr            
+    complex(sp), dimension(:,:), intent(inout) :: A      
 
     complex(sp) :: ii
     integer :: kk, jj, nrow, ncol
-    nrow = size(A%val,1)
-    ncol = size(A%val,2)
+    nrow = size(A,1)
+    ncol = size(A,2)
 
-    ii = (0.0,1.0) 
+    ii = (0.0_sp,1.0_sp) 
     !$acc kernels present(Gr, A)
     do jj = 1, ncol 
        do kk = 1, nrow 
-          A%val(kk,jj) = ii*(Gr%val(kk,jj) - conjg(Gr%val(jj,kk)))
+          A(kk,jj) = ii*(Gr(kk,jj) - conjg(Gr(jj,kk)))
        end do
     end do
     !$acc end kernels
@@ -740,19 +740,19 @@ contains
   ! ------------------------------------------------------------------
 
   subroutine spectral_gpu_dp(Gr, A)
-    type(z_DNS), intent(in) :: Gr            
-    type(z_DNS), intent(inout) :: A      
+    complex(dp), dimension(:,:), intent(in) :: Gr            
+    complex(dp), dimension(:,:), intent(inout) :: A      
 
     complex(dp) :: ii
     integer :: kk, jj, nrow, ncol
-    nrow = size(A%val,1)
-    ncol = size(A%val,2)
+    nrow = size(A,1)
+    ncol = size(A,2)
 
-    ii = (0.0,1.0) 
+    ii = (0.0_dp,1.0_dp) 
     !$acc kernels present(Gr, A)
     do jj = 1, ncol 
        do kk = 1, nrow 
-          A%val(kk,jj) = ii*(Gr%val(kk,jj) - conjg(Gr%val(jj,kk)))
+          A(kk,jj) = ii*(Gr(kk,jj) - conjg(Gr(jj,kk)))
        end do
     end do
     !$acc end kernels
@@ -760,17 +760,17 @@ contains
   ! ------------------------------------------------------------------
 
   subroutine dagger_gpu_sp(Gr, A)
-    type(c_DNS), intent(in) :: Gr            
-    type(c_DNS), intent(inout) :: A      
+    complex(sp), dimension(:,:), intent(in) :: Gr            
+    complex(sp), dimension(:,:), intent(inout) :: A      
 
     integer :: kk, jj, nrow, ncol
-    nrow = size(A%val,1)
-    ncol = size(A%val,2)
+    nrow = size(A,1)
+    ncol = size(A,2)
 
     !$acc kernels present(Gr, A)
     do jj = 1, ncol 
        do kk = 1, nrow 
-          A%val(kk,jj) = conjg(Gr%val(jj,kk))
+          A(kk,jj) = conjg(Gr(jj,kk))
        end do
     end do
     !$acc end kernels
@@ -778,17 +778,17 @@ contains
   ! ------------------------------------------------------------------
 
   subroutine dagger_gpu_dp(Gr, A)
-    type(z_DNS), intent(in) :: Gr            
-    type(z_DNS), intent(inout) :: A      
+    complex(dp), dimension(:,:), intent(in) :: Gr            
+    complex(dp), dimension(:,:), intent(inout) :: A      
 
     integer :: kk, jj, nrow, ncol
-    nrow = size(A%val,1)
-    ncol = size(A%val,2)
+    nrow = size(A,1)
+    ncol = size(A,2)
 
-    !$acc kernels present(Gr%val, A)
+    !$acc kernels present(Gr, A)
     do jj = 1, ncol 
        do kk = 1, nrow 
-          A%val(kk,jj) = conjg(Gr%val(jj,kk))
+          A(kk,jj) = conjg(Gr(jj,kk))
        end do
     end do
     !$acc end kernels
@@ -972,29 +972,29 @@ contains
   ! ------------------------------------------------------------------
 
   function trace_gpu_sp(mat, mask) result(trace)
-    type(c_DNS), intent(in) :: mat
+    complex(sp), dimension(:,:), intent(in) :: mat
     logical, intent(in), optional :: mask(:)
     complex(sp) :: trace
 
-    integer :: i
+    integer :: i, nrow
 
+    nrow = size(mat,1)
     trace = (0_sp,0_sp)
-    call copyToGPU(trace)
     if (present(mask)) then
-       if (size(mask) /= mat%nrow) then
+       if (size(mask) /= nrow) then
           stop 'Error in ztrace_csr: size(mask) /= nrow'
        end if
        !$acc kernels present(mat, mask) copy(trace)
-       do i = 1,mat%nrow
+       do i = 1,nrow
           if (mask(i)) then
-             trace = trace + mat%val(i,i)
+             trace = trace + mat(i,i)
           end if
        end do
        !$acc end kernels
     else
        !$acc kernels present(mat, mask) copy(trace)
-       do i = 1,mat%nrow
-          trace = trace + mat%val(i,i)
+       do i = 1,nrow
+          trace = trace + mat(i,i)
        end do
        !$acc end kernels
     end if
@@ -1002,28 +1002,29 @@ contains
   ! ------------------------------------------------------------------
 
   function trace_gpu_dp(mat, mask) result(trace)
-    type(z_DNS), intent(in) :: mat
+    complex(dp), dimension(:,:), intent(in) :: mat
     logical, intent(in), optional :: mask(:)
     complex(dp) :: trace
 
-    integer :: i
+    integer :: i, nrow
 
+    nrow = size(mat,1)
     trace = (0_dp,0_dp)
     if (present(mask)) then
-       if (size(mask) /= mat%nrow) then
+       if (size(mask) /= nrow) then
           stop 'Error in ztrace_csr: size(mask) /= nrow'
        end if
        !$acc kernels present(mat, mask) copy(trace)
-       do i = 1,mat%nrow
+       do i = 1,nrow
           if (mask(i)) then
-             trace = trace + mat%val(i,i)
+             trace = trace + mat(i,i)
           end if
        end do
        !$acc end kernels
     else
        !$acc kernels present(mat, mask) copy(trace)
-       do i = 1,mat%nrow
-          trace = trace + mat%val(i,i)
+       do i = 1,nrow
+          trace = trace + mat(i,i)
        end do
        !$acc end kernels
     end if

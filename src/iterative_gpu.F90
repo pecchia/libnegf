@@ -535,7 +535,7 @@ contains
        call sum_gpu(hh, T(1,1)%val, summ)
        write(*,*) '       ',nome,'(',1,1,')=', summ
 
-       do i= 2,nbl-1
+       do i= 2,nbl
           call sum_gpu(hh, T(i,i)%val, summ)
           write(*,*) '       ',nome,'(',i,i,')=', summ
           call sum_gpu(hh, T(i-1,i)%val, summ)
@@ -548,7 +548,7 @@ contains
        write(*,*) '~-~-~-~-',nome,' check convergence CPU: ~-~-~-~-'     
        write(*,*) '       ',nome,'(',1,1,')=', sum(ABS(T(1,1)%val))
 
-       do i= 2,nbl-1
+       do i= 2,nbl
           write(*,*) '       ',nome,'(',i,i,')=', sum(ABS(T(i,i)%val))
           
           write(*,*) '       ',nome,'(',i-1,i,')=', sum(ABS(T(i-1,i)%val))
@@ -603,7 +603,7 @@ contains
 
     !Work
     type(CublasHandle) :: hh
-    Type(c_DNS) :: Gam
+    Type(c_DNS) :: Gam, GA
     type(c_DNS) :: work1, work2, work3
     integer :: i,j
     integer :: cb, nbl, ncont, istat
@@ -617,7 +617,6 @@ contains
     nbl = struct%num_PLs
     hh = negf%hcublas
 
-
     do j=1,ncont
 
        if (j.NE.ref .AND. ABS(frm(j)-frm(ref)).GT.EPS) THEN
@@ -626,15 +625,18 @@ contains
 
           !Creating Gam = i (SE -  SE^+)
           call createAll(Gam, SelfEneR(j)%nrow, SelfEneR(j)%ncol)
-          call spectral_gpu(SelfEneR(j),Gam)
+          call spectral_gpu(SelfEneR(j)%val,Gam%val)
 
-          frmdiff = cmplx(frm(j)-frm(ref),0.0_dp,dp)
+          frmdiff = cmplx(frm(j)-frm(ref),0.0_sp,sp)
 
           ! Computation of Gn(cb,cb) = Gr(cb,cb) Gam(cb) Gr(cb,cb)^+
           call createAll(work1, Gam%nrow, Gr(cb,cb)%nrow) !it's Gr^+ --> I take nrow
-          call matmul_gpu_dag(hh, frmdiff, Gam%val, Gr(cb,cb)%val, zero, work1%val)
+          call createAll(GA, Gr(cb,cb)%ncol, Gr(cb,cb)%nrow)
+          call dagger_gpu(Gr(cb,cb)%val, GA%val)
+          call matmul_gpu(hh, frmdiff, Gam%val, GA%val, zero, work1%val)
           call matmul_gpu(hh, one, Gr(cb,cb)%val, work1%val, zero, Gn(cb,cb)%val)
           call destroyAll(work1)
+          call destroyAll(GA)
 
 
           !***************************************************************
@@ -655,18 +657,24 @@ contains
 
              !Gn(i, i) = Gr(i, cb) Gam(cb) Gr(i, cb)^+
              call createAll(work2, Gam%nrow, Gr(i,cb)%nrow)
-             call matmul_gpu_dag(hh, one, Gam%val, Gr(i,cb)%val, zero, work2%val)
+             call createAll(GA, Gr(i,cb)%ncol, Gr(i,cb)%nrow)
+             call dagger_gpu(Gr(i,cb)%val, GA%val)
+             call matmul_gpu(hh, one, Gam%val, GA%val, zero, work2%val)
              call matmul_gpu(hh, frmdiff, Gr(i,cb)%val, work2%val, zero, Gn(i,i)%val)
 
              !Gn(i+1,i)  = Gr(i+1, cb) Gam(cb) Gr(i, cb)^+
              call matmul_gpu(hh, frmdiff, Gr(i+1,cb)%val, work2%val, zero, Gn(i+1,i)%val)
              call destroyAll(work2)
+             call destroyAll(GA)
 
              !Gn(i,i+1)  = Gr(i, cb) Gam(cb) Gr(i+1, cb)^+
              call createAll(work3, Gam%nrow, Gr(i+1,cb)%nrow)
-             call matmul_gpu_dag(hh, frmdiff, Gam%val, Gr(i+1,cb)%val, zero, work3%val)
+             call createAll(GA, Gr(i+1,cb)%ncol, Gr(i+1,cb)%nrow)
+             call dagger_gpu(Gr(i+1,cb)%val, GA%val)
+             call matmul_gpu(hh, frmdiff, Gam%val, GA%val, zero, work3%val)
              call matmul_gpu(hh, one, Gr(i,cb)%val, work3%val, zero, Gn(i,i+1)%val)
              call destroyAll(work3)
+             call destroyAll(GA)
           end do
 
           !***************************************************************
@@ -689,18 +697,25 @@ contains
 
              !Gn(i, i) = Gr(i, cb) Gam(cb) Gr(i, cb)^+
              call createAll(work2, Gam%nrow, Gr(i,cb)%nrow)
-             call matmul_gpu_dag(hh, one, Gam%val, Gr(i,cb)%val, zero, work2%val)
+             call createAll(GA, Gr(i,cb)%ncol, Gr(i,cb)%nrow)
+             call dagger_gpu(Gr(i,cb)%val, GA%val)
+             call matmul_gpu(hh, one, Gam%val, GA%val, zero, work2%val)
              call matmul_gpu(hh, frmdiff, Gr(i,cb)%val, work2%val, zero, Gn(i,i)%val)
 
              !Gn(i-1,i)  = Gr(i-1, cb) Gam(cb) Gr(i, cb)^+
              call matmul_gpu(hh, frmdiff, Gr(i-1,cb)%val, work2%val, zero, Gn(i-1,i)%val)
              call destroyAll(work2)
+             call destroyAll(GA)
 
              !Gn(i,i-1)  = Gr(i, cb) Gam(cb) Gr(i-1, cb)^+
              call createAll(work3, Gam%nrow, Gr(i-1,cb)%nrow)
              call matmul_gpu_dag(hh, one, Gam%val, Gr(i-1,cb)%val, zero, work3%val)
+             call createAll(GA, Gr(i-1,cb)%ncol, Gr(i-1,cb)%nrow)
+             call dagger_gpu(Gr(i-1,cb)%val, GA%val)
+             call matmul_gpu(hh, one, Gam%val, GA%val, zero, work3%val)
              call matmul_gpu(hh, frmdiff, Gr(i,cb)%val, work3%val, zero, Gn(i,i-1)%val)
              call destroyAll(work3)
+             call destroyAll(GA)
           end do
 
           do i=cb-2, 1, -1
@@ -729,7 +744,7 @@ contains
 
     !Work
     type(CublasHandle) :: hh
-    Type(z_DNS) :: Gam
+    Type(z_DNS) :: Gam, GA
     type(z_DNS) :: work1, work2, work3
     integer :: i, j, istat
     integer :: cb, nbl, ncont
@@ -752,15 +767,18 @@ contains
 
           !Creating Gam = i (SE -  SE^+)
           call createAll(Gam, SelfEneR(j)%nrow, SelfEneR(j)%ncol)
-          call spectral_gpu(SelfEneR(j),Gam)
+          call spectral_gpu(SelfEneR(j)%val,Gam%val)
 
           frmdiff = cmplx(frm(j)-frm(ref),0.0_dp,dp)
 
           ! Computation of Gn(cb,cb) = Gr(cb,cb) Gam(cb) Gr(cb,cb)^+
           call createAll(work1, Gam%nrow, Gr(cb,cb)%nrow) !it's Gr^+ --> I take nrow
-          call matmul_gpu_dag(hh, frmdiff, Gam%val, Gr(cb,cb)%val, zero, work1%val)
+          call createAll(GA, Gr(cb,cb)%ncol, Gr(cb,cb)%nrow)
+          call dagger_gpu(Gr(cb,cb)%val, GA%val)
+          call matmul_gpu(hh, frmdiff, Gam%val, GA%val, zero, work1%val)
           call matmul_gpu(hh, one, Gr(cb,cb)%val, work1%val, zero, Gn(cb,cb)%val)
           call destroyAll(work1)
+          call destroyAll(GA)
 
 
           !***************************************************************
@@ -781,18 +799,24 @@ contains
 
              !Gn(i, i) = Gr(i, cb) Gam(cb) Gr(i, cb)^+
              call createAll(work2, Gam%nrow, Gr(i,cb)%nrow)
-             call matmul_gpu_dag(hh, one, Gam%val, Gr(i,cb)%val, zero, work2%val)
+             call createAll(GA, Gr(i,cb)%ncol, Gr(i,cb)%nrow)
+             call dagger_gpu(Gr(i,cb)%val, GA%val)
+             call matmul_gpu(hh, one, Gam%val, GA%val, zero, work2%val)
              call matmul_gpu(hh, frmdiff, Gr(i,cb)%val, work2%val, zero, Gn(i,i)%val)
 
              !Gn(i+1,i)  = Gr(i+1, cb) Gam(cb) Gr(i, cb)^+
              call matmul_gpu(hh, frmdiff, Gr(i+1,cb)%val, work2%val, zero, Gn(i+1,i)%val)
              call destroyAll(work2)
+             call destroyAll(GA)
 
              !Gn(i,i+1)  = Gr(i, cb) Gam(cb) Gr(i+1, cb)^+
              call createAll(work3, Gam%nrow, Gr(i+1,cb)%nrow)
-             call matmul_gpu_dag(hh, frmdiff, Gam%val, Gr(i+1,cb)%val, zero, work3%val)
+             call createAll(GA, Gr(i+1,cb)%ncol, Gr(i+1,cb)%nrow)
+             call dagger_gpu(Gr(i+1,cb)%val, GA%val)
+             call matmul_gpu(hh, frmdiff, Gam%val, GA%val, zero, work3%val)
              call matmul_gpu(hh, one, Gr(i,cb)%val, work3%val, zero, Gn(i,i+1)%val)
              call destroyAll(work3)
+             call destroyAll(GA)
           end do
 
           !***************************************************************
@@ -815,18 +839,25 @@ contains
 
              !Gn(i, i) = Gr(i, cb) Gam(cb) Gr(i, cb)^+
              call createAll(work2, Gam%nrow, Gr(i,cb)%nrow)
-             call matmul_gpu_dag(hh, one, Gam%val, Gr(i,cb)%val, zero, work2%val)
+             call createAll(GA, Gr(i,cb)%ncol, Gr(i,cb)%nrow)
+             call dagger_gpu(Gr(i,cb)%val, GA%val)
+             call matmul_gpu(hh, one, Gam%val, GA%val, zero, work2%val)
              call matmul_gpu(hh, frmdiff, Gr(i,cb)%val, work2%val, zero, Gn(i,i)%val)
 
              !Gn(i-1,i)  = Gr(i-1, cb) Gam(cb) Gr(i, cb)^+
              call matmul_gpu(hh, frmdiff, Gr(i-1,cb)%val, work2%val, zero, Gn(i-1,i)%val)
              call destroyAll(work2)
+             call destroyAll(GA)
 
              !Gn(i,i-1)  = Gr(i, cb) Gam(cb) Gr(i-1, cb)^+
              call createAll(work3, Gam%nrow, Gr(i-1,cb)%nrow)
              call matmul_gpu_dag(hh, one, Gam%val, Gr(i-1,cb)%val, zero, work3%val)
+             call createAll(GA, Gr(i-1,cb)%ncol, Gr(i-1,cb)%nrow)
+             call dagger_gpu(Gr(i-1,cb)%val, GA%val)
+             call matmul_gpu(hh, one, Gam%val, GA%val, zero, work3%val)
              call matmul_gpu(hh, frmdiff, Gr(i,cb)%val, work3%val, zero, Gn(i,i-1)%val)
              call destroyAll(work3)
+             call destroyAll(GA)
           end do
 
           do i=cb-2, 1, -1
@@ -882,11 +913,11 @@ contains
 
     bl1=cblk(ct1);
     call createAll(GA, Gr(bl1,bl1)%ncol, Gr(bl1,bl1)%nrow)
-    call dagger_gpu(Gr(bl1,bl1),GA)
+    call dagger_gpu(Gr(bl1,bl1)%val,GA%val)
 
     ! Computes the Gamma matrices
     call createAll(GAM1_dns, SelfEneR(ct1)%nrow, SelfEneR(ct1)%ncol)
-    call spectral_gpu(SelfEneR(ct1),GAM1_dns)
+    call spectral_gpu(SelfEneR(ct1)%val,GAM1_dns%val)
 
     ! Work to compute transmission matrix (Gamma G Gamma G)
     call createAll(work1, GAM1_dns%nrow, Gr(bl1,bl1)%ncol)
@@ -901,7 +932,7 @@ contains
     call destroyAll(work2)
 
     call createAll(AA, GA%nrow, GA%ncol)
-    call add_gpu(j,Gr(bl1,bl1),mj,GA,AA)
+    call add_gpu(j,Gr(bl1,bl1)%val,mj,GA%val,AA%val)
     call destroyAll(GA)
 
     call createAll(work2, GAM1_dns%nrow, AA%ncol)
@@ -910,17 +941,18 @@ contains
     call destroyAll(AA)
 
     call createAll(TRS, work1%nrow, work1%ncol)
-    call add_gpu(one,work2,mone,work1,TRS)
+    call add_gpu(one,work2%val,mone,work1%val,TRS%val)
     call get_tun_mask(ESH, bl1, tun_proj, tun_mask)
 
     call CopyToGPU(tun_mask)
-    TUN = abs(real(trace_gpu(TRS, tun_mask)))
+    TUN = abs(real(trace_gpu(TRS%val, tun_mask)))
     call deleteGPU(tun_mask)
     call log_deallocate(tun_mask)
 
     call destroyAll(TRS)
     call destroyAll(work1)
     call destroyAll(work2)
+  
   end subroutine calculate_single_transmission_2_contacts_sp
 
   subroutine calculate_single_transmission_2_contacts_dp(negf,ni,nf,ESH,SelfEneR,cblk,tun_proj,Gr,TUN)
@@ -943,6 +975,7 @@ contains
     complex(dp), parameter :: one = (1.0_dp, 0.0_dp)
     complex(dp), parameter :: mone = (-1.0_dp, 0.0_dp)
     complex(dp), parameter :: zero = (0.0_dp, 0.0_dp)
+    real(dp) :: summ
 
     if (size(cblk).gt.2) then
        write(*,*) "ERROR: calculate_single_transmission_2_contacts is valid only for 2 contacts"
@@ -963,11 +996,11 @@ contains
 
     bl1=cblk(ct1);
     call createAll(GA, Gr(bl1,bl1)%ncol, Gr(bl1,bl1)%nrow)
-    call dagger_gpu(Gr(bl1,bl1),GA)
+    call dagger_gpu(Gr(bl1,bl1)%val,GA%val)
 
     ! Computes the Gamma matrices
     call createAll(GAM1_dns, SelfEneR(ct1)%nrow, SelfEneR(ct1)%ncol)
-    call spectral_gpu(SelfEneR(ct1),GAM1_dns)
+    call spectral_gpu(SelfEneR(ct1)%val,GAM1_dns%val)
 
     ! Work to compute transmission matrix (Gamma G Gamma G)
     call createAll(work1, GAM1_dns%nrow, Gr(bl1,bl1)%ncol)
@@ -982,7 +1015,7 @@ contains
     call destroyAll(work2)
 
     call createAll(AA, GA%nrow, GA%ncol)
-    call add_gpu(j,Gr(bl1,bl1),mj,GA,AA)
+    call add_gpu(j,Gr(bl1,bl1)%val,mj,GA%val,AA%val)
     call destroyAll(GA)
 
     call createAll(work2, GAM1_dns%nrow, AA%ncol)
@@ -991,11 +1024,11 @@ contains
     call destroyAll(AA)
 
     call createAll(TRS, work1%nrow, work1%ncol)
-    call add_gpu(one,work2,mone,work1,TRS)
+    call add_gpu(one,work2%val,mone,work1%val,TRS%val)
     call get_tun_mask(ESH, bl1, tun_proj, tun_mask)
 
     call CopyToGPU(tun_mask)
-    TUN = abs(real(trace_gpu(TRS, tun_mask)))
+    TUN = abs(real(trace_gpu(TRS%val, tun_mask)))
     call deleteGPU(tun_mask)
     call log_deallocate(tun_mask)
 
@@ -1039,7 +1072,6 @@ contains
     nbl = size(cblk)
     hh = negf%hcublas
     ! in this way nt1 < nt2 by construction
-
     if ( nbl.gt.1 .and. (bl2-bl1).gt.1) then
 
        ! Compute column-blocks of Gr(i,bl1) up to i=bl2
@@ -1049,7 +1081,7 @@ contains
           !If so next block is also null => TUN = 0
           call copyFromGPU(Gr(i-1,bl1))
           max=maxval(abs(Gr(i-1,bl1)%val))
-
+          
           if (max.lt.EPS) then
              TUN = EPS*EPS !for log plots
              !Destroy also the block adjecent to diagonal since
@@ -1077,30 +1109,32 @@ contains
     ! Computes the Gamma matrices
     call createAll(GAM1_dns, SelfEneR(ct1)%nrow, SelfEneR(ct1)%ncol)
     call createAll(GAM2_dns, SelfEneR(ct2)%nrow, SelfEneR(ct2)%ncol)
-    call spectral_gpu(SelfEneR(ct1),GAM1_dns)
-    call spectral_gpu(SelfEneR(ct2),GAM2_dns)
+    call spectral_gpu(SelfEneR(ct1)%val,GAM1_dns%val)
+    call spectral_gpu(SelfEneR(ct2)%val,GAM2_dns%val)
 
     ! Work to compute transmission matrix (Gamma2 Gr Gamma1 Ga)
-    call createAll(work1, GAM2_dns%nrow, Gr(bl2,bl1)%ncol)
-    call matmul_gpu(hh, one, GAM2_dns%val, Gr(bl2,bl1)%val, zero, work1%val)
-    call destroyAll(GAM2_dns)
+    call createAll(work1, Gr(bl2,bl1)%nrow, GAM1_dns%ncol)
+    call matmul_gpu(hh, one, Gr(bl2,bl1)%val, GAM1_dns%val, zero, work1%val)
 
-    call createAll(work2, work1%nrow, GAM1_dns%ncol)
-    call matmul_gpu(hh, one, work1%val, GAM1_dns%val, zero, work2%val)
+    call createAll(work2, GAM2_dns%nrow, work1%ncol)
+    call matmul_gpu(hh, one, GAM2_dns%val, work1%val, zero, work2%val)
+
     call destroyAll(work1)
+    call destroyAll(GAM2_dns)
     call destroyAll(GAM1_dns)
 
     call createAll(TRS, work2%nrow, Gr(bl2,bl1)%nrow)
-    call matmul_gpu_dag(hh, one, work2%val, Gr(bl2,bl1)%val, zero, TRS%val)
-    call destroyAll(work2)
 
+    call createAll(GA, Gr(bl2,bl1)%ncol, Gr(bl2,bl1)%nrow)
+    call dagger_gpu(Gr(bl2,bl1)%val,GA%val)
+    call matmul_gpu(hh, one, work2%val, GA%val, zero, TRS%val)
+    call destroyAll(work2)
+    call destroyAll(GA)
     if (bl2.gt.bl1+1) call destroyAll(Gr(bl2,bl1))
 
     call get_tun_mask(ESH, bl2, tun_proj, tun_mask)
     call copyToGPU(tun_mask)
-
-    TUN = abs(real(trace_gpu(TRS, tun_mask)))
-    write(*,*) 'N_conts: TUN=', TUN 
+    TUN = abs(real(trace_gpu(TRS%val, tun_mask)))
     call deleteGPU(tun_mask) 
     call log_deallocate(tun_mask)
 
@@ -1178,61 +1212,66 @@ contains
     ! Computes the Gamma matrices
     call createAll(GAM1_dns, SelfEneR(ct1)%nrow, SelfEneR(ct1)%ncol)
     call createAll(GAM2_dns, SelfEneR(ct2)%nrow, SelfEneR(ct2)%ncol)
-    call spectral_gpu(SelfEneR(ct1),GAM1_dns)
-    call spectral_gpu(SelfEneR(ct2),GAM2_dns)
+    call spectral_gpu(SelfEneR(ct1)%val,GAM1_dns%val)
+    call spectral_gpu(SelfEneR(ct2)%val,GAM2_dns%val)
 
-        write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-'
-        write(*,*) 'N_conts: TRS= GAM2 * Gr(bl2,bl1)* GAM1 * Gr(bl2,bl1)^+'
-        call sum_gpu(hh, GAM1_dns%val, summ)
-        write(*,*) 'N_conts: sum_GAM1_dns=', summ
-        call sum_gpu(hh, GAM2_dns%val, summ)
-        write(*,*) 'N_conts: sum_GAM2_dns=', summ
-        call sum_gpu(hh, Gr(bl2,bl1)%val, summ)
-        write(*,*) 'N_conts: sum_Gr(',bl2,bl1,')=', summ
-        write(*,*) ''
+         write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-'
+         write(*,*) 'N_conts: TRS= GAM2 * Gr(bl2,bl1)* GAM1 * Gr(bl2,bl1)^+'
+         call sum_gpu(hh, GAM1_dns%val, summ)
+         write(*,*) 'N_conts: sum_GAM1_dns=', summ
+    !     call sum_gpu(hh, GAM2_dns%val, summ)
+    !    write(*,*) 'N_conts: sum_GAM2_dns=', summ
+         call sum_gpu(hh, Gr(bl2,bl1)%val, summ)
+         write(*,*) 'N_conts: sum_Gr(',bl2,bl1,')=', summ
+         write(*,*) ''
 
     ! Work to compute transmission matrix (Gamma2 Gr Gamma1 Ga)
-    write(*,*) ''
-    write(*,*) 'Gr(bl2,bl1)%nrow=', Gr(bl2,bl1)%nrow
-    write(*,*) 'Gr(bl2,bl1)%ncol=', Gr(bl2,bl1)%ncol
-    write(*,*) 'GAM1_dns%nrow=', GAM1_dns%nrow
-    write(*,*) 'GAM1_dns%ncol=', GAM1_dns%ncol
-    write(*,*) 'GAM2_dns%nrow=', GAM2_dns%nrow
-    write(*,*) 'GAM2_dns%ncol=', GAM2_dns%ncol
-    write(*,*) ''
+    !   write(*,*) ''
+    !   write(*,*) 'Gr(bl2,bl1)%nrow=', Gr(bl2,bl1)%nrow
+    !   write(*,*) 'Gr(bl2,bl1)%ncol=', Gr(bl2,bl1)%ncol
+    !   write(*,*) 'GAM1_dns%nrow=', GAM1_dns%nrow
+    !   write(*,*) 'GAM1_dns%ncol=', GAM1_dns%ncol
+    !   write(*,*) 'GAM2_dns%nrow=', GAM2_dns%nrow
+    !   write(*,*) 'GAM2_dns%ncol=', GAM2_dns%ncol
+    !   write(*,*) ''
     call createAll(work1, Gr(bl2,bl1)%nrow, GAM1_dns%ncol)
     call matmul_gpu(hh, one, Gr(bl2,bl1)%val, GAM1_dns%val, zero, work1%val)
 
     call createAll(work2, GAM2_dns%nrow, work1%ncol)
     call matmul_gpu(hh, one, GAM2_dns%val, work1%val, zero, work2%val)
-        call sum_gpu(hh, work1%val, summ)
-        write(*,*) 'N_conts: sum_work1=', summ
-        call sum_gpu(hh, GAM2_dns%val, summ)
-        write(*,*) 'N_conts: sum_GAM2_dns=', summ
-        call sum_gpu(hh, work2%val, summ)
-        write(*,*) 'N_conts: sum_work2=', summ
+         call sum_gpu(hh, work1%val, summ)
+         write(*,*) 'N_conts: sum_work1=', summ
+         call sum_gpu(hh, GAM2_dns%val, summ)
+         write(*,*) 'N_conts: sum_GAM2_dns=', summ
+         call sum_gpu(hh, work2%val, summ)
+         write(*,*) 'N_conts: sum_work2_gpu=', summ
+         call copyFromGPU(work2)
+         write(*,*) 'N_conts: sum_work2_cpu', sum(ABS(work2%val))
 
     call destroyAll(work1)
     call destroyAll(GAM2_dns)
     call destroyAll(GAM1_dns)
 
     call createAll(TRS, work2%nrow, Gr(bl2,bl1)%nrow)
-    call matmul_gpu_dag(hh, one, work2%val, Gr(bl2,bl1)%val, zero, TRS%val)
-    call destroyAll(work2)
 
+    call createAll(GA, Gr(bl2,bl1)%ncol, Gr(bl2,bl1)%nrow)
+    call dagger_gpu(Gr(bl2,bl1)%val,GA%val)
+    call matmul_gpu(hh, one, work2%val, GA%val, zero, TRS%val)
+    !call matmul_gpu_dag(hh, one, work2%val, Gr(bl2,bl1)%val, zero, TRS%val)
+    call destroyAll(work2)
+    call destroyAll(GA)
     if (bl2.gt.bl1+1) call destroyAll(Gr(bl2,bl1))
 
     call get_tun_mask(ESH, bl2, tun_proj, tun_mask)
     call copyToGPU(tun_mask)
-        call copyFromGPU(TRS)
-        write(*,*) 'N_conts: sum_TRS_cpu=', sum(ABS(TRS%val))
-    TUN = abs(real(trace_gpu(TRS, tun_mask)))
-    !TUN = abs(real(trace(TRS, tun_mask)))
-        write(*,*) 'N_conts: TUN= abs(real(trace(TRS)))'
-        call sum_gpu(hh, TRS%val, summ)
-        write(*,*) 'N_conts: sum_TRS_gpu=', summ
-        write(*,*) 'N_conts: TUN=', TUN
-        write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-' 
+         call copyFromGPU(TRS)
+         write(*,*) 'N_conts: sum_TRS_cpu=', sum(ABS(TRS%val))
+    TUN = abs(real(trace_gpu(TRS%val, tun_mask)))
+    !    write(*,*) 'N_conts: TUN= abs(real(trace(TRS)))'
+         call sum_gpu(hh, TRS%val, summ)
+         write(*,*) 'N_conts: sum_TRS_gpu=', summ
+         write(*,*) 'N_conts: TUN=', TUN
+         write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-' 
     call deleteGPU(tun_mask) 
     call log_deallocate(tun_mask)
 

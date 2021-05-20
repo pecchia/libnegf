@@ -72,10 +72,12 @@ module ContSelfEnergy
      module procedure compute_contacts_dns
   end interface
 
+#:if defined("GPU")
   interface decimation_gpu
      module procedure decimation_gpu_sp        
      module procedure decimation_gpu_dp        
   end interface 
+#:endif
 
 contains
   !--------------------------------------------------------------------
@@ -304,6 +306,7 @@ contains
 
   !---------------------------------------------------------------------------------------
   ! --------------------------------------------------------------------
+#:if defined("GPU")
   subroutine decimation_gpu_sp(negf,Go_out,Ao_in,Bo_in,Co_in,n,tf32,ncyc)
     implicit none
     type(Tnegf), intent(in) :: negf
@@ -539,7 +542,7 @@ contains
     deallocate(pivot)
 
   end subroutine decimation_gpu_dp
-
+#:endif
 !-------------------------------------------------------------------------------
   subroutine compute_contacts_csr(Ec,pnegf,ncyc,Tlc,Tcl,SelfEneR,GS)
     complex(dp), intent(in) :: Ec
