@@ -603,7 +603,7 @@ contains
 
     !Work
     type(CublasHandle) :: hh
-    Type(c_DNS) :: Gam
+    Type(c_DNS) :: Gam, GA
     type(c_DNS) :: work1, work2, work3
     integer :: i,j
     integer :: cb, nbl, ncont, istat
