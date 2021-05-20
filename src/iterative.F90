@@ -153,14 +153,12 @@ CONTAINS
     !! Add interaction self energy contribution, if any
     if (allocated(negf%inter)) call negf%inter%add_sigma_r(ESH)
 #:if defined("GPU")
-    call check_convergence_trid(negf,ESH,'ESH',.false.)
+    !call check_convergence_trid(negf,ESH,'ESH',.false.)
     call copy_trid_toGPU(ESH)
-    call check_convergence_trid(negf,ESH,'ESH',.true.)
+    !call check_convergence_trid(negf,ESH,'ESH',.true.)
 #:endif
     call allocate_gsm(gsmr,nbl)
     call calculate_gsmr_blocks(negf,ESH,nbl,2,gsmr)
-
-    call check_convergence_vec(negf,gsmr,'gsmr',.true.)
 
     call allocate_blk_dns(Gr,nbl)
 
@@ -168,9 +166,10 @@ CONTAINS
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,2,nbl)
 
 #:if defined("GPU")
-    call check_convergence_trid(negf,Gr,'Gr ',.true.)
+    !call check_convergence_vec(negf,gsmr,'gsmr',.true.)
+    !call check_convergence_trid(negf,Gr,'Gr ',.true.)
     call copy_trid_toHOST(Gr) 
-    call check_convergence_trid(negf,Gr,'Gr ',.false.)
+    !call check_convergence_trid(negf,Gr,'Gr ',.false.)
 #:endif
     call destroy_ESH(ESH)
     call deallocate_blk_dns(ESH)
@@ -288,7 +287,7 @@ CONTAINS
 
 #:if defined("GPU")
       call copy_trid_toGPU(ESH)
-      call check_convergence_trid(negf,ESH,'ESH',.true.)
+      !call check_convergence_trid(negf,ESH,'ESH',.true.)
       call copy_vdns_toGPU(SelfEneR)
 #:endif
 
@@ -322,7 +321,7 @@ CONTAINS
       call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,rbl-1,1)
 
 #:if defined("GPU")
-      call check_convergence_trid(negf,Gr,'Gr ',.true.)
+      !call check_convergence_trid(negf,Gr,'Gr ',.true.)
       call copy_trid_toHOST(Gr) 
 #:endif
 
@@ -368,7 +367,7 @@ CONTAINS
       call calculate_Gn_tridiag_blocks(negf,ESH,SelfEneR,frm,ref,negf%str,gsml,gsmr,Gr,Gn)
 
 #:if defined("GPU")
-      call check_convergence_trid(negf,Gn,'Gn ',.true.)
+      !call check_convergence_trid(negf,Gn,'Gn ',.true.)
       call copy_trid_toHOST(Gn) 
 #:endif
 
@@ -3180,7 +3179,7 @@ CONTAINS
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,1)
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,2,nbl)
     !Computation of transmission(s) between contacts ni(:) -> nf(:)
-    write(*,*) 'Gr computed'
+    !write(*,*) 'Gr computed'
     do icpl=1,size(ni)
 
        nit=ni(icpl)
@@ -3204,9 +3203,9 @@ CONTAINS
 
     !Distruzione dei blocchi fuori-diagonale
 #:if defined("GPU")    
-    write(*,*) 'Gr to be copied to host'
+    !write(*,*) 'Gr to be copied to host'
     call copy_trid_toHOST(Gr) 
-    write(*,*) 'Gr copied to host'
+    !write(*,*) 'Gr copied to host'
     do i=2,nbl
       call destroyAll(Gr(i-1,i))
       call destroyAll(Gr(i,i-1))
@@ -3225,9 +3224,9 @@ CONTAINS
     Grm%rowpnt(:)=1
 
 #:if defined("GPU")
-    write(*,*) 'SE to be deleted'
+    !write(*,*) 'SE to be deleted'
     call delete_vdns_fromGPU(SelfEneR)
-    write(*,*) 'SE deleted'
+    !write(*,*) 'SE deleted'
     do i=1,nbl
        call create(GrCSR,Gr(i,i)%nrow,Gr(i,i)%ncol,Gr(i,i)%nrow*Gr(i,i)%ncol)
        call dns2csr(Gr(i,i),GrCSR)
