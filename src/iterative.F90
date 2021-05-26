@@ -126,21 +126,46 @@ CONTAINS
     integer, intent(in) :: outer
 
     !Work
-    type(z_DNS), dimension(:,:), allocatable :: ESH
-    type(z_CSR) :: ESH_tot, Ain
+    type(z_DNS), dimension(:,:), allocatable :: ESH, S, H
+    type(z_CSR) :: ESH_tot, Ain, S_csr, H_csr
     integer :: i,ierr, nbl, ncont,ii,n
     real(dp) :: sum1
+    complex(dp), parameter :: one = (1.0_dp,0.0_dp )
+    complex(dp), parameter :: mone = (-1.0_dp,0.0_dp )
 
     nbl = negf%str%num_PLs
     ncont = negf%str%num_conts
 
+    write(*,*) 'Routine: calculate_Gr'
 
     ! Take CSR H,S and build ES-H in dense blocks
+#:if defined("GPU")
+    call allocate_blk_dns(ESH,nbl)
+    call allocate_blk_dns(S,nbl)
+    call allocate_blk_dns(H,nbl)
+    call copy_vdns_toGPU(SelfEneR)
+
+    call build_ESH_onGPU(negf, E, S, H, ESH)
+
+    associate(cblk=>negf%str%cblk)
+    do i=1,ncont
+       call add_gpu((1.0_dp,0.0_dp),ESH(cblk(i),cblk(i))%val, (-1.0_dp,0.0_dp),SelfEneR(i)%val,ESH(cblk(i),cblk(i))%val)
+    end do
+    end associate
+    
+    call delete_vdns_fromGPU(SelfEneR)
+    call destroy_ESH(S)
+    call destroy_ESH(H)
+    deallocate(S)
+    deallocate(H)
+    call copy_trid_toHOST(ESH)
+    call check_convergence_trid(negf, ESH, 'ESH', .true.)
+#:else
     call prealloc_sum(negf%H,negf%S,(-1.0_dp, 0.0_dp),E,ESH_tot)
 
     call allocate_blk_dns(ESH,nbl)
 
-    call zcsr2blk_sod(ESH_tot, ESH, negf%str%mat_PL_start)
+    call csr2blk_sod(ESH_tot, ESH, negf%str%mat_PL_start)
 
     call destroy(ESH_tot)
 
@@ -149,14 +174,10 @@ CONTAINS
          ESH(cblk(i),cblk(i))%val = ESH(cblk(i),cblk(i))%val-SelfEneR(i)%val
       end do
     end associate
-    write(*,*) 'Routine: calculate_Gr'
+#:endif
     !! Add interaction self energy contribution, if any
     if (allocated(negf%inter)) call negf%inter%add_sigma_r(ESH)
-#:if defined("GPU")
-    !call check_convergence_trid(negf,ESH,'ESH',.false.)
-    call copy_trid_toGPU(ESH)
-    !call check_convergence_trid(negf,ESH,'ESH',.true.)
-#:endif
+    
     call allocate_gsm(gsmr,nbl)
     call calculate_gsmr_blocks(negf,ESH,nbl,2,gsmr)
 
@@ -166,10 +187,7 @@ CONTAINS
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,2,nbl)
 
 #:if defined("GPU")
-    !call check_convergence_vec(negf,gsmr,'gsmr',.true.)
-    !call check_convergence_trid(negf,Gr,'Gr ',.true.)
     call copy_trid_toHOST(Gr) 
-    !call check_convergence_trid(negf,Gr,'Gr ',.false.)
 #:endif
     call destroy_ESH(ESH)
     call deallocate_blk_dns(ESH)
@@ -250,46 +268,59 @@ CONTAINS
     integer :: ref, iter
     complex(dp) :: Ec
     integer :: i,ierr,ncont,nbl, lbl, rbl
-    type(z_DNS), dimension(:,:), allocatable :: ESH
+    type(z_DNS), dimension(:,:), allocatable :: ESH, S, H
     type(z_DNS), dimension(:,:), allocatable :: Gn
     integer, dimension(:), allocatable :: Gr_columns
     type(z_CSR) :: ESH_tot, Gl
     logical :: mask(MAXNCONT)
     real(dp) :: sum1
 
-
     nbl = negf%str%num_PLs
     ncont = negf%str%num_conts
     ref = negf%refcont
+    write(*,*) 'Routine: calculate_Gn_neq_comp'
+
     associate (cblk=>negf%str%cblk, indblk=>negf%str%mat_PL_start)
 
       Ec = cmplx(E,0.0_dp,dp)
-      write(*,*) 'Routine: calculate_Gn_neq_comp'
 
       ! Take CSR H,S and build ES-H in dense blocks
+#:if defined("GPU")
+    call allocate_blk_dns(ESH,nbl)
+    call allocate_blk_dns(S,nbl)
+    call allocate_blk_dns(H,nbl)
+    call copy_vdns_toGPU(SelfEneR)
+
+    call build_ESH_onGPU(negf, Ec, S, H, ESH)
+
+    do i=1,ncont
+       call add_gpu((1.0_dp,0.0_dp),ESH(cblk(i),cblk(i))%val, (-1.0_dp,0.0_dp),SelfEneR(i)%val,ESH(cblk(i),cblk(i))%val)
+    end do
+    
+    call destroy_ESH(S)
+    call destroy_ESH(H)
+    deallocate(S)
+    deallocate(H)
+    call copy_trid_toHOST(ESH)
+    call check_convergence_trid(negf, ESH, 'ESH', .true.)
+#:else
       call prealloc_sum(negf%H,negf%S,(-1.0_dp, 0.0_dp),Ec,ESH_tot)
 
       call allocate_blk_dns(ESH,nbl)
 
-      call zcsr2blk_sod(ESH_tot,ESH, negf%str%mat_PL_start)
+      call csr2blk_sod(ESH_tot,ESH, negf%str%mat_PL_start)
 
       call destroy(ESH_tot)
 
       do i=1,ncont
          ESH(cblk(i),cblk(i))%val = ESH(cblk(i),cblk(i))%val-SelfEneR(i)%val
       end do
-
+#:endif
       !! Add interaction self energy if any and initialize scba counter
       if (allocated(negf%inter)) then
          call negf%inter%add_sigma_r(ESH)
          if (allocated(negf%inter)) iter = negf%inter%scba_iter
       end if
-
-#:if defined("GPU")
-      call copy_trid_toGPU(ESH)
-      !call check_convergence_trid(negf,ESH,'ESH',.true.)
-      call copy_vdns_toGPU(SelfEneR)
-#:endif
 
       call allocate_gsm(gsmr,nbl)
       call allocate_gsm(gsml,nbl)
@@ -321,7 +352,6 @@ CONTAINS
       call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,rbl-1,1)
 
 #:if defined("GPU")
-      !call check_convergence_trid(negf,Gr,'Gr ',.true.)
       call copy_trid_toHOST(Gr) 
 #:endif
 
@@ -367,7 +397,6 @@ CONTAINS
       call calculate_Gn_tridiag_blocks(negf,ESH,SelfEneR,frm,ref,negf%str,gsml,gsmr,Gr,Gn)
 
 #:if defined("GPU")
-      !call check_convergence_trid(negf,Gn,'Gn ',.true.)
       call copy_trid_toHOST(Gn) 
 #:endif
 
@@ -375,10 +404,6 @@ CONTAINS
       !NOTE:  calculate_Gn has factor [f_i - f_ref], hence all terms will contain this factor
       if (allocated(negf%inter)) then
          call calculate_Gn_tridiag_elph_contributions(negf,ESH,iter,Gn,Gr_columns)
-         !call destroy_gsm(gsmr)
-         !call deallocate_gsm(gsmr)
-         !call destroy_gsm(gsml)
-         !call deallocate_gsm(gsml)
       end if
       !THE FOLLOWING DESTROY ROUTINES WERE INSIDE THE ABOVE "IF STATEMENT", BUT NOW WE NEED IT REGARDLESS OF THE INTERACTIONS
       call destroy_gsm(gsmr)
@@ -448,7 +473,7 @@ CONTAINS
     integer :: i,ierr,ncont,nbl,lbl,ii,n
     integer :: pl_start, pl_end
     integer :: ref, iter, lead, lead_blk, ref_blk
-    type(z_DNS), dimension(:,:), allocatable :: ESH, Gn
+    type(z_DNS), dimension(:,:), allocatable :: ESH, Gn, S, H
     integer, dimension(:), allocatable :: Gr_columns
     type(z_DNS) :: work1, work2, Gam, A
     type(z_CSR) :: ESH_tot, Gl
@@ -457,6 +482,7 @@ CONTAINS
     ncont = negf%str%num_conts
     ref = negf%refcont
     ref_blk = negf%str%cblk(ref)
+    write(*,*) 'Routine: iterative_meir_w'
     associate (cblk=>negf%str%cblk)
 
       iter = 0
@@ -465,13 +491,31 @@ CONTAINS
       end if
 
       Ec=cmplx(E,0.0_dp,dp)
-      write(*,*) 'Routine: iterative_meir_w'
 
+#:if defined("GPU")
+      call allocate_blk_dns(ESH,nbl)
+      call allocate_blk_dns(S,nbl)
+      call allocate_blk_dns(H,nbl)
+      call copy_vdns_toGPU(SelfEneR)
+
+      call build_ESH_onGPU(negf, Ec, S, H, ESH)
+
+      do i=1,ncont
+         call add_gpu((1.0_dp,0.0_dp),ESH(cblk(i),cblk(i))%val, (-1.0_dp,0.0_dp),SelfEneR(i)%val,ESH(cblk(i),cblk(i))%val)
+      end do
+    
+      call destroy_ESH(S)
+      call destroy_ESH(H)
+      deallocate(S)
+      deallocate(H)
+      call copy_trid_toHOST(ESH)
+      call check_convergence_trid(negf, ESH, 'ESH', .true.)
+#:else
       call prealloc_sum(negf%H,negf%S,(-1.0_dp, 0.0_dp),Ec,ESH_tot)
 
       call allocate_blk_dns(ESH,nbl)
 
-      call zcsr2blk_sod(ESH_tot, ESH, negf%str%mat_PL_start)
+      call csr2blk_sod(ESH_tot, ESH, negf%str%mat_PL_start)
 
       call destroy(ESH_tot)
 
@@ -482,10 +526,6 @@ CONTAINS
 
       !! Add el-ph self energy if any
       if (allocated(negf%inter)) call negf%inter%add_sigma_r(ESH)
-
-#:if defined("GPU")
-      call copy_trid_toGPU(ESH)
-      call copy_vdns_toGPU(SelfEneR)
 #:endif
 
       call allocate_gsm(gsmr,nbl)
@@ -574,11 +614,9 @@ CONTAINS
       DEALLOCATE(Gn)
 
 #:if defined("GPU")
-      call destroy_blk(Gr)
       call delete_vdns_fromGPU(SelfEneR)
-#:else
-      call destroy_blk(Gr)
 #:endif
+      call destroy_blk(Gr)
       DEALLOCATE(Gr)
 
       call destroy_ESH(ESH)
@@ -3005,7 +3043,7 @@ CONTAINS
     Real(dp), Dimension(:) :: tun_mat
 
     ! Local variables
-    Type(z_DNS), Dimension(:,:), allocatable :: ESH
+    Type(z_DNS), Dimension(:,:), allocatable :: ESH, S_dns, H_dns
     Real(dp) :: tun
     Integer :: nbl,ncont,ibl
     Integer :: i, ierr, icpl, nit, nft, nt, nt1
@@ -3020,11 +3058,31 @@ CONTAINS
 
     write(*,*) 'Routine: calculate_transmissions'
     !Calculation of ES-H and brak into blocks
+#:if defined("GPU")
+    call allocate_blk_dns(ESH,nbl)
+    call allocate_blk_dns(S_dns,nbl)
+    call allocate_blk_dns(H_dns,nbl)
+    call copy_vdns_toGPU(SelfEneR)
+
+    call build_ESH_onGPU(negf, Ec, S_dns, H_dns, ESH)
+
+    do i=1,ncont
+       ibl = str%cblk(i)
+       call add_gpu((1.0_dp,0.0_dp),ESH(ibl,ibl)%val, (-1.0_dp,0.0_dp),SelfEneR(i)%val,ESH(ibl,ibl)%val)
+    end do
+    
+    call destroy_ESH(S_dns)
+    call destroy_ESH(H_dns)
+    deallocate(S_dns)
+    deallocate(H_dns)
+    call copy_trid_toHOST(ESH)
+    call check_convergence_trid(negf, ESH, 'ESH', .true.)
+#:else
     call prealloc_sum(H,S,(-1.0_dp, 0.0_dp),Ec,ESH_tot)
 
     call allocate_blk_dns(ESH,nbl)
 
-    call zcsr2blk_sod(ESH_tot,ESH,str%mat_PL_start)
+    call csr2blk_sod(ESH_tot,ESH,str%mat_PL_start)
     call destroy(ESH_tot)
 
     !Inclusion of the contact Self-Energies to the relevant blocks
@@ -3041,10 +3099,6 @@ CONTAINS
     else
        nt = str%cblk(nft)
     endif
-
-#:if defined("GPU")
-    call copy_trid_toGPU(ESH)
-    call copy_vdns_toGPU(SelfEneR)
 #:endif
 
     ! Fall here when there are 2 contacts for fast transmission
@@ -3101,23 +3155,16 @@ CONTAINS
 #:if defined("GPU")
     call delete_vdns_fromGPU(SelfEneR)
 #:endif
+    call destroy_ESH(ESH)
+    call deallocate_blk_dns(ESH)
+
     !Distruzione delle Green
     call destroy_ESH(Gr) 
-    !do i=2, nt
-    !  call destroy(Gr(i,i))
-    !  call destroy(Gr(i-1,i))
-    !  call destroy(Gr(i,i-1))
-    !end do
-    !call destroy(Gr(1,1))
-
     call deallocate_blk_dns(Gr)
 
     !Deallocate energy-dependent matrices
     call destroy_gsm(gsmr)
     call deallocate_gsm(gsmr)
-
-    call destroy_ESH(ESH)
-    call deallocate_blk_dns(ESH)
 
   end subroutine calculate_transmissions
 
@@ -3141,37 +3188,54 @@ CONTAINS
 
     ! Local variables
     Type(z_CSR) :: ESH_tot, GrCSR
-    Type(z_DNS), Dimension(:,:), allocatable :: ESH
+    Type(z_DNS), Dimension(:,:), allocatable :: ESH, S_dns, H_dns
     Type(r_CSR) :: Grm                          ! Green Retarded nella molecola
     real(dp), dimension(:), allocatable :: diag
     Real(dp) :: tun, summ
     Complex(dp) :: zc
     Integer :: nbl,ncont, ierr
     Integer :: nit, nft, icpl
-    Integer :: iLDOS, i2, i
+    Integer :: iLDOS, i2, i, ibl
     Character(1) :: Im
 
     nbl = str%num_PLs
     ncont = str%num_conts
     Im = 'I'
 
+    write(*,*) 'Routine: trans_and_dos'
     !Calculation of ES-H and brak into blocks
+#:if defined("GPU")
+    call allocate_blk_dns(ESH,nbl)
+    call allocate_blk_dns(S_dns,nbl)
+    call allocate_blk_dns(H_dns,nbl)
+    call copy_vdns_toGPU(SelfEneR)
+
+    call build_ESH_onGPU(negf, Ec, S_dns, H_dns, ESH)
+
+    do i=1,ncont
+       ibl = str%cblk(i)
+       call add_gpu((1.0_dp,0.0_dp),ESH(ibl,ibl)%val, (-1.0_dp,0.0_dp),SelfEneR(i)%val,ESH(ibl,ibl)%val)
+    end do
+    
+    call destroy_ESH(S_dns)
+    call destroy_ESH(H_dns)
+    deallocate(S_dns)
+    deallocate(H_dns)
+    call copy_trid_toHOST(ESH)
+    call check_convergence_trid(negf, ESH, 'ESH', .true.)
+#:else
     call prealloc_sum(H,S,(-1.0_dp, 0.0_dp),Ec,ESH_tot)
 
     call allocate_blk_dns(ESH,nbl)
-    call zcsr2blk_sod(ESH_tot,ESH,str%mat_PL_start)
+    call csr2blk_sod(ESH_tot,ESH,str%mat_PL_start)
     call destroy(ESH_tot)
 
     !Inclusion of the contact Self-Energies to the relevant blocks
     do i=1,ncont
        ESH(str%cblk(i),str%cblk(i))%val = ESH(str%cblk(i),str%cblk(i))%val-SelfEneR(i)%val
     end do
-    write(*,*) 'Routine: trans_and_dos'
-#:if defined("GPU")
-    call copy_trid_toGPU(ESH)
-    call copy_vdns_toGPU(SelfEneR)
 #:endif
-
+    
     call allocate_gsm(gsmr,nbl)
     call calculate_gsmr_blocks(negf,ESH,nbl,2,gsmr)
 
@@ -3179,7 +3243,6 @@ CONTAINS
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,1)
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,2,nbl)
     !Computation of transmission(s) between contacts ni(:) -> nf(:)
-    !write(*,*) 'Gr computed'
     do icpl=1,size(ni)
 
        nit=ni(icpl)
@@ -3203,9 +3266,7 @@ CONTAINS
 
     !Distruzione dei blocchi fuori-diagonale
 #:if defined("GPU")    
-    !write(*,*) 'Gr to be copied to host'
     call copy_trid_toHOST(Gr) 
-    !write(*,*) 'Gr copied to host'
     do i=2,nbl
       call destroyAll(Gr(i-1,i))
       call destroyAll(Gr(i,i-1))
@@ -3224,9 +3285,7 @@ CONTAINS
     Grm%rowpnt(:)=1
 
 #:if defined("GPU")
-    !write(*,*) 'SE to be deleted'
     call delete_vdns_fromGPU(SelfEneR)
-    !write(*,*) 'SE deleted'
     do i=1,nbl
        call create(GrCSR,Gr(i,i)%nrow,Gr(i,i)%ncol,Gr(i,i)%nrow*Gr(i,i)%ncol)
        call dns2csr(Gr(i,i),GrCSR)

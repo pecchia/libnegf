@@ -27,7 +27,7 @@ module elphds
   use ln_allocation, only : log_allocate, log_deallocate
   use ln_structure, only : TStruct_info
   use mat_def, only : z_csr, z_dns, create, destroy
-  use sparsekit_drv, only : extract, zcsr2blk_sod, nzdrop, &
+  use sparsekit_drv, only : extract, csr2blk_sod, nzdrop, &
       & prealloc_mult, dns2csr, csr2dns, prealloc_sum
   
   implicit none
@@ -171,7 +171,7 @@ contains
     allocate(tmp_blk(npl,npl),stat=ierr)
     do ii = 1,this%nummodes
       if (ierr.ne.0) stop 'ALLOCATION ERROR: could not allocate block-Matrix'
-      call zcsr2blk_sod(this%sigma_r(ii), tmp_blk, this%struct%mat_PL_start)
+      call csr2blk_sod(this%sigma_r(ii), tmp_blk, this%struct%mat_PL_start)
       do jj = 1,npl
         ESH(jj, jj)%val = ESH(jj, jj)%val - tmp_blk(jj, jj)%val
         call destroy(tmp_blk(jj,jj))
@@ -216,7 +216,7 @@ contains
     allocate(tmp_blk(npl,npl),stat=ierr)
     do ii = 1, this%nummodes
       if (ierr.ne.0) stop 'ALLOCATION ERROR: could not allocate block-Matrix'
-      call zcsr2blk_sod(this%sigma_n(ii), tmp_blk, this%struct%mat_PL_start)
+      call csr2blk_sod(this%sigma_n(ii), tmp_blk, this%struct%mat_PL_start)
       do jj = 1,npl
         blk_sigma_n(jj, jj)%val = blk_sigma_n(jj, jj)%val + tmp_blk(jj, jj)%val
         call destroy(tmp_blk(jj,jj))
