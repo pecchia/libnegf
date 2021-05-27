@@ -158,7 +158,6 @@ CONTAINS
     call destroy_ESH(H)
     deallocate(S)
     deallocate(H)
-    call copy_trid_toHOST(ESH)
     call check_convergence_trid(negf, ESH, 'ESH', .true.)
 #:else
     call prealloc_sum(negf%H,negf%S,(-1.0_dp, 0.0_dp),E,ESH_tot)
@@ -301,7 +300,6 @@ CONTAINS
     call destroy_ESH(H)
     deallocate(S)
     deallocate(H)
-    call copy_trid_toHOST(ESH)
     call check_convergence_trid(negf, ESH, 'ESH', .true.)
 #:else
       call prealloc_sum(negf%H,negf%S,(-1.0_dp, 0.0_dp),Ec,ESH_tot)
@@ -508,7 +506,6 @@ CONTAINS
       call destroy_ESH(H)
       deallocate(S)
       deallocate(H)
-      call copy_trid_toHOST(ESH)
       call check_convergence_trid(negf, ESH, 'ESH', .true.)
 #:else
       call prealloc_sum(negf%H,negf%S,(-1.0_dp, 0.0_dp),Ec,ESH_tot)
@@ -3075,7 +3072,6 @@ CONTAINS
     call destroy_ESH(H_dns)
     deallocate(S_dns)
     deallocate(H_dns)
-    call copy_trid_toHOST(ESH)
     call check_convergence_trid(negf, ESH, 'ESH', .true.)
 #:else
     call prealloc_sum(H,S,(-1.0_dp, 0.0_dp),Ec,ESH_tot)
@@ -3221,7 +3217,6 @@ CONTAINS
     call destroy_ESH(H_dns)
     deallocate(S_dns)
     deallocate(H_dns)
-    call copy_trid_toHOST(ESH)
     call check_convergence_trid(negf, ESH, 'ESH', .true.)
 #:else
     call prealloc_sum(H,S,(-1.0_dp, 0.0_dp),Ec,ESH_tot)

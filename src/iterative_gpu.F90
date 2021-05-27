@@ -168,13 +168,11 @@ contains
     hhsol = negf%hcusolver
 
     call createAll(gsmr(sbl),nrow,nrow)
-    !$acc update device(ESH(sbl,sbl)%val)
     call inverse_gpu(hh, hhsol, ESH(sbl,sbl)%val, gsmr(sbl)%val, istat)
 
     do i=sbl-1,ebl,-1
 
        call createAll(work1, ESH(i,i+1)%nrow, gsmr(i+1)%ncol)    
-       !$acc update device(ESH(i,i+1)%val)
        call matmul_gpu(hh, one, ESH(i,i+1)%val, gsmr(i+1)%val, zero, work1%val)
 
        if (.not.keep) then
@@ -182,12 +180,10 @@ contains
        end if
 
        call createAll(work2, work1%nrow, ESH(i+1,i)%ncol)
-       !$acc update device(ESH(i+1,i)%val)
        call matmul_gpu(hh, one, work1%val, ESH(i+1,i)%val, zero, work2%val)
        call destroyAll(work1)
 
        call createAll(work1,  ESH(i,i)%nrow, ESH(i,i)%ncol)
-       !$acc update device(ESH(i,i)%val)
        call add_cublas(hh, work1%val, ESH(i,i)%val, mone, work2%val)
        call destroyAll(work2)
 
@@ -281,22 +277,18 @@ contains
     hhsol = negf%hcusolver
 
     call createAll(gsml(sbl),nrow,nrow)
-    !$acc update device(ESH(sbl,sbl)%val)
     call inverse_gpu(hh, hhsol, ESH(sbl,sbl)%val, gsml(sbl)%val, istat)
 
     do i=sbl+1,ebl
 
        call createAll(work1, ESH(i,i-1)%nrow, gsml(i-1)%ncol)    
-       !$acc update device(ESH(i,i-1)%val)
        call matmul_gpu(hh, one, ESH(i,i-1)%val, gsml(i-1)%val, zero, work1%val)
 
        call createAll(work2, work1%nrow, ESH(i-1,i)%ncol)
-       !$acc update device(ESH(i-1,i)%val)
        call matmul_gpu(hh, one, work1%val, ESH(i-1,i)%val, zero, work2%val)
        call destroyAll(work1)
 
        call createAll(work1,  ESH(i,i)%nrow, ESH(i,i)%ncol)
-       !$acc update device(ESH(i,i)%val)
        call add_cublas(hh, work1%val, ESH(i,i)%val, mone, work2%val)
        call destroyAll(work2)
 
@@ -449,22 +441,17 @@ contains
     if (.not.present(ebl)) then
        if (nbl.eq.1) then
           call createAll(Gr(sbl,sbl), ESH(sbl,sbl)%nrow, ESH(sbl,sbl)%ncol)
-          !$acc update device(ESH(sbl,sbl)%val)
           call inverse_gpu(hh, hhsol, ESH(sbl,sbl)%val, Gr(sbl,sbl)%val, istat)
        else
           call createAll(work1, ESH(sbl,sbl)%nrow, ESH(sbl,sbl)%ncol)
-          !$acc update device(ESH(sbl,sbl)%val)
           call copy_mat_gpu(hh, ESH(sbl,sbl)%val, work1%val)
 
           if (sbl+1.le.nbl) then
              call createAll(work2, ESH(sbl,sbl+1)%nrow, gsmr(sbl+1)%ncol)
-             !$acc update device(ESH(sbl,sbl+1)%val)
              call matmul_gpu(hh, one, ESH(sbl,sbl+1)%val, gsmr(sbl+1)%val, zero, work2%val)
 
              call createAll(work3, work2%nrow, ESH(sbl+1,sbl)%ncol)
-             !$acc update device(ESH(sbl+1,sbl)%val)
              call matmul_gpu(hh, one, work2%val, ESH(sbl+1,sbl)%val, zero, work3%val)
-             !$acc update device(ESH(sbl,sbl)%val)
              call add_cublas(hh, work1%val, ESH(sbl,sbl)%val, mone, work3%val)
 
              call destroyAll(work2)
@@ -472,13 +459,10 @@ contains
           end if
           if (sbl-1.ge.1) then
              call createAll(work2, ESH(sbl,sbl-1)%nrow, gsml(sbl-1)%ncol)
-             !$acc update device(ESH(sbl,sbl-1)%val)
              call matmul_gpu(hh, one, ESH(sbl,sbl-1)%val, gsml(sbl-1)%val, zero, work2%val)
 
              call createAll(work3, work2%nrow, ESH(sbl-1,sbl)%ncol)
-             !$acc update device(ESH(sbl-1,sbl)%val)
              call matmul_gpu(hh, one, work2%val, ESH(sbl-1,sbl)%val, zero, work3%val)
-             !$acc update device(ESH(sbl,sbl)%val)
              call add_cublas(hh, work1%val, ESH(sbl,sbl)%val, mone, work3%val)
 
              call destroyAll(work2)
@@ -498,14 +482,12 @@ contains
        do i=sbl,ebl,1
           call createAll(work1, gsmr(i)%nrow, ESH(i,i-1)%ncol)
           call createAll(Gr(i,i-1), work1%nrow, Gr(i-1,i-1)%ncol)
-          !$acc update device(ESH(i,i-1)%val)
           call matmul_gpu(hh, one, gsmr(i)%val, ESH(i,i-1)%val, zero, work1%val)
           call matmul_gpu(hh, mone, work1%val, Gr(i-1,i-1)%val, zero, Gr(i,i-1)%val)
 
           call destroyAll(work1)
           call createAll(work2, ESH(i-1,i)%nrow, gsmr(i)%ncol)
           call createAll(Gr(i-1,i), Gr(i-1,i-1)%nrow, work2%ncol)
-          !$acc update device(ESH(i-1,i)%val)
           call matmul_gpu(hh, one, ESH(i-1,i)%val, gsmr(i)%val, zero, work2%val)
           call matmul_gpu(hh, mone, Gr(i-1,i-1)%val, work2%val, zero, Gr(i-1,i)%val)
 
@@ -521,14 +503,12 @@ contains
        do i=sbl,ebl,-1
           call createAll(work1, gsml(i)%nrow, ESH(i,i+1)%ncol)
           call createAll(Gr(i,i+1),work1%nrow,Gr(i+1,i+1)%ncol)
-          !$acc update device(ESH(i,i+1)%val)
           call matmul_gpu(hh, one, gsml(i)%val, ESH(i,i+1)%val, zero, work1%val)
           call matmul_gpu(hh, mone, work1%val, Gr(i+1,i+1)%val, zero, Gr(i,i+1)%val)
 
           call destroyAll(work1)
           call createAll(work2, ESH(i+1,i)%nrow, gsml(i)%ncol)
           call createAll(Gr(i+1,i), Gr(i+1,i+1)%nrow, work2%ncol)
-          !$acc update device(ESH(i+1,i)%val)
           call matmul_gpu(hh, one, ESH(i+1,i)%val, gsml(i)%val, zero, work2%val)
           call matmul_gpu(hh, mone, Gr(i+1,i+1)%val, work2%val, zero, Gr(i+1,i)%val)
 
@@ -793,7 +773,6 @@ contains
 
           !Creating Gam = i (SE -  SE^+)
           call createAll(Gam, SelfEneR(j)%nrow, SelfEneR(j)%ncol)
-          !$acc update device(SelfEneR(j)%val)
           call spectral_gpu(SelfEneR(j)%val,Gam%val)
 
           frmdiff = cmplx(frm(j)-frm(ref),0.0_dp,dp)
@@ -820,7 +799,6 @@ contains
                 call createAll(work1, ESH(i,i+1)%nrow, Gr(i+1,cb)%ncol)   
                 call createAll(Gr(i,cb), gsml(i)%nrow, work1%ncol)
              end if
-             !$acc update device(ESH(i,i+1)%val)
              call matmul_gpu(hh, one, ESH(i,i+1)%val, Gr(i+1,cb)%val,zero, work1%val)
              call matmul_gpu(hh, mone, gsml(i)%val, work1%val, zero, Gr(i,cb)%val)
              call destroyAll(work1)
@@ -860,7 +838,6 @@ contains
                 call createAll(work1, ESH(i,i-1)%nrow, Gr(i-1,cb)%ncol)
                 call createAll(Gr(i,cb), gsmr(i)%nrow, work1%ncol)
              end if
-             !$acc update device(ESH(i,i-1)%val)
              call matmul_gpu(hh, one, ESH(i,i-1)%val, Gr(i-1,cb)%val,zero, work1%val)
              call matmul_gpu(hh, mone, gsmr(i)%val, work1%val, zero, Gr(i,cb)%val)
              call destroyAll(work1)
@@ -1296,24 +1273,16 @@ contains
     call copy_trid_toGPU(H)
 
     call createAll(ESH(1,1), S(1,1)%nrow, S(1,1)%ncol)
-    !$acc update device(S(1,1)%val)
-    !$acc update device(H(1,1)%val)
     call add_gpu(E,S(1,1)%val, mone, H(1,1)%val, ESH(1,1)%val)
 
     do i=2,nbl
        call createAll(ESH(i,i), S(i,i)%nrow, S(i,i)%ncol)
-       !$acc update device(S(i,i)%val)
-       !$acc update device(H(i,i)%val)
        call add_gpu(E,S(i,i)%val, mone, H(i,i)%val, ESH(i,i)%val)
 
        call createAll(ESH(i-1,i), S(i-1,i)%nrow, S(i-1,i)%ncol)
-       !$acc update device(S(i-1,i)%val)
-       !$acc update device(H(i-1,i)%val)
        call add_gpu(E,S(i-1,i)%val, mone, H(i-1,i)%val, ESH(i-1,i)%val)
 
        call createAll(ESH(i,i-1), S(i,i-1)%nrow, S(i,i-1)%ncol)
-       !$acc update device(S(i,i-1)%val)
-       !$acc update device(H(i,i-1)%val)
        call add_gpu(E,S(i,i-1)%val, mone, H(i,i-1)%val, ESH(i,i-1)%val)
     end do
 
