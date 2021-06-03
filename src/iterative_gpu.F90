@@ -6,7 +6,7 @@ module iterative_gpu
   use ln_structure, only : TStruct_Info
   use lib_param, only : MAXNCONT, Tnegf, intarray
   use mpi_globals, only : id, numprocs, id0
-  use sparsekit_drv, only: trace
+  use sparsekit_drv, only: csr2blk_sod
   use clock
   use cudautils
   use cublas_v2
@@ -22,6 +22,7 @@ module iterative_gpu
   public :: calculate_Gn_tridiag_blocks
   public :: calculate_single_transmission_2_contacts
   public :: calculate_single_transmission_N_contacts
+  public :: build_ESH_onGPU 
   public :: check_convergence_trid
   public :: check_convergence_vec
 
@@ -55,6 +56,11 @@ module iterative_gpu
      module procedure calculate_single_transmission_N_contacts_dp
   end interface calculate_single_transmission_N_contacts
 
+  interface build_ESH_onGPU 
+!     module procedure build_ESH_onGPU_sp 
+     module procedure build_ESH_onGPU_dp
+  end interface build_ESH_onGPU 
+  
   interface get_tun_mask 
      module procedure get_tun_mask_sp 
      module procedure get_tun_mask_dp
@@ -1219,38 +1225,12 @@ contains
     call spectral_gpu(SelfEneR(ct1)%val,GAM1_dns%val)
     call spectral_gpu(SelfEneR(ct2)%val,GAM2_dns%val)
 
-         write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-'
-         write(*,*) 'N_conts: TRS= GAM2 * Gr(bl2,bl1)* GAM1 * Gr(bl2,bl1)^+'
-         call sum_gpu(hh, GAM1_dns%val, summ)
-         write(*,*) 'N_conts: sum_GAM1_dns=', summ
-    !     call sum_gpu(hh, GAM2_dns%val, summ)
-    !    write(*,*) 'N_conts: sum_GAM2_dns=', summ
-         call sum_gpu(hh, Gr(bl2,bl1)%val, summ)
-         write(*,*) 'N_conts: sum_Gr(',bl2,bl1,')=', summ
-         write(*,*) ''
-
     ! Work to compute transmission matrix (Gamma2 Gr Gamma1 Ga)
-    !   write(*,*) ''
-    !   write(*,*) 'Gr(bl2,bl1)%nrow=', Gr(bl2,bl1)%nrow
-    !   write(*,*) 'Gr(bl2,bl1)%ncol=', Gr(bl2,bl1)%ncol
-    !   write(*,*) 'GAM1_dns%nrow=', GAM1_dns%nrow
-    !   write(*,*) 'GAM1_dns%ncol=', GAM1_dns%ncol
-    !   write(*,*) 'GAM2_dns%nrow=', GAM2_dns%nrow
-    !   write(*,*) 'GAM2_dns%ncol=', GAM2_dns%ncol
-    !   write(*,*) ''
     call createAll(work1, Gr(bl2,bl1)%nrow, GAM1_dns%ncol)
     call matmul_gpu(hh, one, Gr(bl2,bl1)%val, GAM1_dns%val, zero, work1%val)
 
     call createAll(work2, GAM2_dns%nrow, work1%ncol)
     call matmul_gpu(hh, one, GAM2_dns%val, work1%val, zero, work2%val)
-         call sum_gpu(hh, work1%val, summ)
-         write(*,*) 'N_conts: sum_work1=', summ
-         call sum_gpu(hh, GAM2_dns%val, summ)
-         write(*,*) 'N_conts: sum_GAM2_dns=', summ
-         call sum_gpu(hh, work2%val, summ)
-         write(*,*) 'N_conts: sum_work2_gpu=', summ
-         call copyFromGPU(work2)
-         write(*,*) 'N_conts: sum_work2_cpu', sum(ABS(work2%val))
 
     call destroyAll(work1)
     call destroyAll(GAM2_dns)
@@ -1261,29 +1241,94 @@ contains
     call createAll(GA, Gr(bl2,bl1)%ncol, Gr(bl2,bl1)%nrow)
     call dagger_gpu(Gr(bl2,bl1)%val,GA%val)
     call matmul_gpu(hh, one, work2%val, GA%val, zero, TRS%val)
-    !call matmul_gpu_dag(hh, one, work2%val, Gr(bl2,bl1)%val, zero, TRS%val)
     call destroyAll(work2)
     call destroyAll(GA)
     if (bl2.gt.bl1+1) call destroyAll(Gr(bl2,bl1))
 
     call get_tun_mask(ESH, bl2, tun_proj, tun_mask)
     call copyToGPU(tun_mask)
-         call copyFromGPU(TRS)
-         write(*,*) 'N_conts: sum_TRS_cpu=', sum(ABS(TRS%val))
     TUN = abs(real(trace_gpu(TRS%val, tun_mask)))
-    !    write(*,*) 'N_conts: TUN= abs(real(trace(TRS)))'
-         call sum_gpu(hh, TRS%val, summ)
-         write(*,*) 'N_conts: sum_TRS_gpu=', summ
-         write(*,*) 'N_conts: TUN=', TUN
-         write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-' 
+    
     call deleteGPU(tun_mask) 
     call log_deallocate(tun_mask)
 
     call destroyAll(TRS)
 
   end subroutine calculate_single_transmission_N_contacts_dp
+  
+  subroutine build_ESH_onGPU_dp(negf, E, S, H, ESH)
+    type(z_DNS), intent(inout), dimension(:,:) :: ESH
+    type(z_DNS), intent(inout), dimension(:,:) :: S, H
+    type(Tnegf), intent(in) :: negf
+    complex(dp), intent(in) :: E
+         
+    type(z_CSR) :: H_csr, S_csr
+    integer :: i, nbl
+    complex(dp), parameter :: one = (1.0_dp,0.0_dp )
+    complex(dp), parameter :: mone = (-1.0_dp,0.0_dp )
 
-  ! Based on projection indices build a logical mask just on contact block 
+    nbl = negf%str%num_PLs
+    H_csr = negf%H
+    S_csr = negf%S
+
+    call csr2blk_sod(H_csr, H, negf%str%mat_PL_start)
+    call csr2blk_sod(S_csr, S, negf%str%mat_PL_start)
+    call copy_trid_toGPU(S)
+    call copy_trid_toGPU(H)
+
+    call createAll(ESH(1,1), S(1,1)%nrow, S(1,1)%ncol)
+    call add_gpu(E,S(1,1)%val, mone, H(1,1)%val, ESH(1,1)%val)
+
+    do i=2,nbl
+       call createAll(ESH(i,i), S(i,i)%nrow, S(i,i)%ncol)
+       call add_gpu(E,S(i,i)%val, mone, H(i,i)%val, ESH(i,i)%val)
+
+       call createAll(ESH(i-1,i), S(i-1,i)%nrow, S(i-1,i)%ncol)
+       call add_gpu(E,S(i-1,i)%val, mone, H(i-1,i)%val, ESH(i-1,i)%val)
+
+       call createAll(ESH(i,i-1), S(i,i-1)%nrow, S(i,i-1)%ncol)
+       call add_gpu(E,S(i,i-1)%val, mone, H(i,i-1)%val, ESH(i,i-1)%val)
+    end do
+
+  end subroutine build_ESH_onGPU_dp        
+  
+!  subroutine build_ESH_onGPU_sp(negf, E, S, H, ESH)
+!    type(c_DNS), intent(inout), dimension(:,:) :: ESH
+!    type(c_DNS), intent(inout), dimension(:,:) :: S, H
+!    type(Tnegf), intent(in) :: negf
+!    complex(sp), intent(in) :: E
+!          
+!    integer :: i, nbl
+!    type(c_CSR) :: H_csr, S_csr
+!    complex(sp), parameter :: one = (1.0_sp,0.0_sp)
+!    complex(sp), parameter :: mone = (-1.0_sp,0.0_sp )
+!
+!    nbl = negf%str%num_PLs
+!    H_csr = negf%H
+!    S_csr = negf%S
+!
+!    call csr2blk_sod(H_csr, H, negf%str%mat_PL_start)
+!    call csr2blk_sod(S_csr, S, negf%str%mat_PL_start)
+!    call copy_trid_toGPU(S)
+!    call copy_trid_toGPU(H)
+!
+!    call createAll(ESH(1,1), S(1,1)%nrow, S(1,1)%ncol)
+!    call add_gpu(E,S(1,1)%val, mone, H(1,1)%val, ESH(1,1)%val)
+!
+!    do i=2,nbl
+!       call createAll(ESH(i,i), S(i,i)%nrow, S(i,i)%ncol)
+!       call add_gpu(E,S(i,i)%val, mone, H(i,i)%val, ESH(i,i)%val)
+!
+!       call createAll(ESH(i-1,i), S(i-1,i)%nrow, S(i-1,i)%ncol)
+!       call add_gpu(E,S(i-1,i)%val, mone, H(i-1,i)%val, ESH(i-1,i)%val)
+!
+!       call createAll(ESH(i,i-1), S(i,i-1)%nrow, S(i,i-1)%ncol)
+!       call add_gpu(E,S(i,i-1)%val, mone, H(i,i-1)%val, ESH(i,i-1)%val)
+!    end do
+!
+!  end subroutine build_ESH_onGPU_sp        
+
+! Based on projection indices build a logical mask just on contact block 
   subroutine get_tun_mask_sp(ESH,nbl,tun_proj,tun_mask)
     Type(c_DNS), intent(in) :: ESH(:,:)
     integer, intent(in) :: nbl

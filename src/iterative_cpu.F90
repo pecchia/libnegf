@@ -18,6 +18,7 @@ module iterative_cpu
   public :: calculate_Gn_tridiag_blocks
   public :: calculate_single_transmission_2_contacts
   public :: calculate_single_transmission_N_contacts
+  public :: check_convergence_trid
 
 contains
 
@@ -636,6 +637,34 @@ contains
     end if
 
   end subroutine get_tun_mask
+  
+  subroutine check_convergence_trid(negf,T,nome,gpu)
+    type(Tnegf), intent(in) :: negf      
+    type(z_DNS), dimension(:,:), intent(in) :: T
+    character(3), intent(in) :: nome
+    logical, intent(in) :: gpu
+
+    integer :: nbl, i
+    real(dp) :: summ 
+
+    nbl = size(T,1)
+    
+    if (gpu .eq. .true.) then
+       write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
+    else
+       write(*,*) '~-~-~-~-',nome,' check convergence CPU: ~-~-~-~-'     
+       write(*,*) '       ',nome,'(',1,1,')=', sum(ABS(T(1,1)%val))
+
+       do i= 2,nbl
+          write(*,*) '       ',nome,'(',i,i,')=', sum(ABS(T(i,i)%val))
+          
+          write(*,*) '       ',nome,'(',i,i-1,')=', sum(ABS(T(i,i-1)%val))
+          
+          write(*,*) '       ',nome,'(',i-1,i,')=', sum(ABS(T(i-1,i)%val))
+       end do
+       write(*,*) '~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-'     
+    endif     
+  end subroutine check_convergence_trid
 
 end module iterative_cpu
 

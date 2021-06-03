@@ -14,8 +14,6 @@ module cudautils
   public :: createAll
   public :: destroyAll
 
-  public :: copyMatToGPU
-  public :: copyMatFromGPU
   public :: deleteMatGPU
   public :: createMatGPU
 
@@ -24,6 +22,11 @@ module cudautils
   public :: copy_vdns_toGPU
   public :: copy_vdns_toHOST
   public :: delete_vdns_fromGPU
+
+  public :: init_trid_toGPU
+  public :: create_trid_toGPU
+  public :: update_trid_toGPU
+  public :: delete_trid_fromGPU
 
   public :: copy_mat_gpu
   public :: matmul_gpu
@@ -44,6 +47,8 @@ module cudautils
      module procedure copyToGPU_dns_dp
      module procedure copyToGPU_comp_vec_sp 
      module procedure copyToGPU_comp_vec_dp
+     module procedure copyToGPU_comp_mat_sp
+     module procedure copyToGPU_comp_mat_dp
      module procedure copyToGPU_real_sp
      module procedure copyToGPU_real_dp
      module procedure copyToGPU_comp_sp
@@ -59,6 +64,8 @@ module cudautils
   interface copyFromGPU
      module procedure copyFromGPU_dns_sp
      module procedure copyFromGPU_dns_dp
+     module procedure copyFromGPU_comp_mat_sp
+     module procedure copyFromGPU_comp_mat_dp
      module procedure copyFromGPU_real_sp
      module procedure copyFromGPU_real_dp
   end interface copyFromGPU
@@ -79,16 +86,6 @@ module cudautils
      module procedure destroyAll_dp
   end interface destroyAll
   ! ------------------------------------------------------------------
-
-  interface copyMatToGPU
-     module procedure copyMatToGPU_sp
-     module procedure copyMatToGPU_dp
-  end interface copyMatToGPU
-
-  interface copyMatFromGPU
-     module procedure copyMatFromGPU_sp
-     module procedure copyMatFromGPU_dp
-  end interface copyMatFromGPU
 
   interface createMatGPU
      module procedure createMatGPU_sp
@@ -125,6 +122,25 @@ module cudautils
      module procedure copy_vdns_toHOST_sp
      module procedure copy_vdns_toHOST_dp
   end interface copy_vdns_toHOST
+ 
+
+
+
+  interface create_trid_toGPU
+     module procedure create_trid_toGPU_dp
+  end interface create_trid_toGPU
+  
+  interface init_trid_toGPU
+     module procedure init_trid_toGPU_dp
+  end interface init_trid_toGPU
+  
+  interface update_trid_toGPU
+     module procedure update_trid_toGPU_dp
+  end interface update_trid_toGPU
+  
+  interface delete_trid_fromGPU
+     module procedure delete_trid_fromGPU_dp
+  end interface delete_trid_fromGPU
   ! ------------------------------------------------------------------
 
   interface copy_mat_gpu
@@ -205,11 +221,6 @@ contains
     !$acc enter data copyin(A%val)
   end subroutine copyToGPU_dns_dp
 
-  subroutine copyToGPU_comp_vec_sp(V)
-    complex(sp), dimension(:), intent(in) :: V     
-    !$acc enter data copyin(V)
-  end subroutine copyToGPU_comp_vec_sp
-
   subroutine copyToGPU_real_sp(r)
     real(sp), intent(in) :: r     
     !$acc enter data copyin(r)
@@ -230,10 +241,25 @@ contains
     !$acc enter data copyin(r)
   end subroutine copyToGPU_comp_dp
   
+  subroutine copyToGPU_comp_vec_sp(V)
+    complex(sp), dimension(:), intent(in) :: V     
+    !$acc enter data copyin(V)
+  end subroutine copyToGPU_comp_vec_sp 
+
   subroutine copyToGPU_comp_vec_dp(V)
     complex(dp), dimension(:), intent(in) :: V     
     !$acc enter data copyin(V)
   end subroutine copyToGPU_comp_vec_dp
+
+  subroutine copyToGPU_comp_mat_sp(Mat)
+    complex(sp), intent(in) :: Mat(:,:)      
+    !$acc enter data copyin(Mat)
+  end subroutine copyToGPU_comp_mat_sp
+
+  subroutine copyToGPU_comp_mat_dp(Mat)
+    complex(dp), intent(in) :: Mat(:,:)      
+    !$acc enter data copyin(Mat)
+  end subroutine copyToGPU_comp_mat_dp
 
   subroutine copyToGPU_logic_vec(V)
     logical, dimension(:), intent(in) :: V     
@@ -252,7 +278,17 @@ contains
     !$acc update host(A%val)
   end subroutine copyFromGPU_dns_dp
 
-   subroutine copyFromGPU_real_sp(r)
+  subroutine copyFromGPU_comp_mat_sp(Mat)
+    complex(sp), intent(out) :: Mat(:,:)      
+    !$acc update host(Mat)
+  end subroutine copyFromGPU_comp_mat_sp
+
+  subroutine copyFromGPU_comp_mat_dp(Mat)
+    complex(dp), intent(out) :: Mat(:,:)      
+    !$acc update host(Mat)
+  end subroutine copyFromGPU_comp_mat_dp
+  
+  subroutine copyFromGPU_real_sp(r)
     real(sp), intent(inout) :: r     
     !$acc update host(r)
   end subroutine copyFromGPU_real_sp
@@ -311,7 +347,6 @@ contains
   end subroutine destroyAll_dp
   ! ------------------------------------------------------------------
 
-
   subroutine createMatGPU_sp(Mat)
     complex(sp), intent(in) :: Mat(:,:)      
     !$acc enter data create(Mat)
@@ -321,28 +356,6 @@ contains
     complex(dp), intent(in) :: Mat(:,:)      
     !$acc enter data create(Mat)
   end subroutine createMatGPU_dp
-  ! ------------------------------------------------------------------
-
-  subroutine copyMatToGPU_sp(Mat)
-    complex(sp), intent(in) :: Mat(:,:)      
-    !$acc enter data copyin(Mat)
-  end subroutine copyMatToGPU_sp
-
-  subroutine copyMatToGPU_dp(Mat)
-    complex(dp), intent(in) :: Mat(:,:)      
-    !$acc enter data copyin(Mat)
-  end subroutine copyMatToGPU_dp
-  ! ------------------------------------------------------------------
-
-  subroutine copyMatFromGPU_sp(Mat)
-    complex(sp), intent(out) :: Mat(:,:)      
-    !$acc update host(Mat)
-  end subroutine copyMatFromGPU_sp
-
-  subroutine copyMatFromGPU_dp(Mat)
-    complex(dp), intent(out) :: Mat(:,:)      
-    !$acc update host(Mat)
-  end subroutine copyMatFromGPU_dp
   ! ------------------------------------------------------------------
 
   subroutine deleteMatGPU_sp(Mat)
@@ -625,14 +638,14 @@ contains
   ! ------------------------------------------------------------------
 
   subroutine init_mat_gpu_dp(A)
-    type(z_DNS) :: A      
+    complex(dp), dimension(:,:) :: A      
 
     integer :: jj
 
     !$acc kernels present(A)
-    A%val = (0.0, 0.0)
-    do jj = 1, size(A%val,1) 
-       A%val(jj,jj) = (1.0, 0.0)
+    A = (0.0, 0.0)
+    do jj = 1, size(A,1) 
+       A(jj,jj) = (1.0, 0.0)
     end do
     !$acc end kernels
 
@@ -865,18 +878,27 @@ contains
     integer :: ii, nbl
 
     nbl = size(M,1)
-    !call copyToGPU(M(1,1))
-    !$acc enter data copyin(M(1,1)%val)
     do ii=2,nbl
-    !$acc enter data copyin(M(ii,ii)%val)
-    !$acc enter data copyin(M(ii-1,ii)%val)
-    !$acc enter data copyin(M(ii,ii-1)%val)
-
-    !   call copyToGPU(M(ii,ii))
-    !   call copyToGPU(M(ii-1,ii))
-    !   call copyToGPU(M(ii,ii-1))
+       call copyToGPU(M(ii,ii-1))
+       call copyToGPU(M(ii-1,ii))
+       call copyToGPU(M(ii,ii))
     end do
+    call copyToGPU(M(1,1))
   end subroutine copy_trid_toGPU_dp
+  ! ------------------------------------------------------------------
+
+  subroutine delete_trid_fromGPU_dp(M)
+    type(z_DNS), dimension(:,:), intent(in) :: M
+    integer :: ii, nbl
+
+    nbl = size(M,1)
+    call deleteGPU(M(1,1))
+    do ii=2,nbl
+       call deleteGPU(M(ii,ii))
+       call deleteGPU(M(ii-1,ii))
+       call deleteGPU(M(ii,ii-1))
+    end do
+  end subroutine delete_trid_fromGPU_dp
   ! ------------------------------------------------------------------
 
   subroutine copy_trid_toHOST_sp(M)
@@ -905,6 +927,49 @@ contains
        call copyFromGPU(M(ii,ii-1))
     end do
   end subroutine copy_trid_toHOST_dp
+  ! ------------------------------------------------------------------
+  
+  subroutine create_trid_toGPU_dp(nbl)
+    integer, intent(in) :: nbl
+
+    type(z_DNS), dimension(nbl,nbl) :: ESH
+    integer :: ii
+
+    call createGPU(ESH(1,1))
+    do ii=2,nbl
+       call createGPU(ESH(ii,ii))
+       call createGPU(ESH(ii-1,ii))
+       call createGPU(ESH(ii,ii-1))
+    end do
+  end subroutine create_trid_toGPU_dp
+  ! ------------------------------------------------------------------
+  
+  subroutine init_trid_toGPU_dp(M)
+    type(z_DNS), dimension(:,:), intent(inout) :: M
+    integer :: ii, nbl
+
+    nbl = size(M,1)
+    call init_mat_gpu(M(1,1)%val)
+    do ii=2,nbl
+       call init_mat_gpu(M(ii,ii)%val)
+       call init_mat_gpu(M(ii-1,ii)%val)
+       call init_mat_gpu(M(ii,ii-1)%val)
+    end do
+  end subroutine init_trid_toGPU_dp
+  ! ------------------------------------------------------------------
+  
+  subroutine update_trid_toGPU_dp(M)
+    type(z_DNS), dimension(:,:), intent(inout) :: M
+    integer :: ii, nbl
+
+    nbl = size(M,1)
+    !$acc update device(M(1,1)%val) 
+    do ii=2,nbl
+       !$acc update device(M(ii,ii)%val) 
+       !$acc update device(M(ii-1,ii)%val) 
+       !$acc update device(M(ii,ii-1)%val) 
+    end do
+  end subroutine update_trid_toGPU_dp
   ! ------------------------------------------------------------------
 
   subroutine copy_vdns_toGPU_sp(V)

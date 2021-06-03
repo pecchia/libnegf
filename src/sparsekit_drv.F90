@@ -32,7 +32,7 @@ MODULE sparsekit_drv
   public :: prealloc_sum, prealloc_mult
   public :: check_nnz, nzdrop, getdiag, trace, getelement
   public :: check_if_hermitian
-  public :: zcsr2blk_sod
+  public :: csr2blk_sod
 
   public :: zsumcsr1
   public :: ramub_st
@@ -182,6 +182,7 @@ MODULE sparsekit_drv
   interface extract
      module procedure zextract_csr
      module procedure zextract_dns
+     module procedure cextract_dns
   end interface
   interface concat
      module procedure  zconcat_csr
@@ -217,6 +218,10 @@ MODULE sparsekit_drv
   interface check_if_hermitian
      module procedure check_hermitian_csr   
      module procedure check_hermitian_dns   
+  end interface
+  interface csr2blk_sod
+     module procedure zcsr2blk_sod
+     module procedure ccsr2blk_sod
   end interface
 
   integer, parameter :: MISMATCH = 1
@@ -2818,7 +2823,34 @@ CONTAINS
 
   end subroutine zextract_dns
   !------------------------------------------------------------------------------
+  subroutine cextract_dns(A_csr,i1,i2,j1,j2,A_dns)
+    type(c_CSR) :: A_csr
+    type(c_DNS) :: A_dns
+    integer :: i1,i2,j1,j2
 
+    integer :: i,k
+
+    IF ((i1.GT.i2).OR.(j1.GT.j2).OR.(i2.GT.A_csr%nrow).OR.(j2.GT.A_csr%ncol)) THEN
+       print*, 'ERROR (zextract_dns): bad indeces specification';
+       print*, 'Trying to extract block from matrix',A_csr%nrow,'x',A_csr%ncol  
+       print*, 'Indices Rows',i1,i2,'Cols',j1,j2  
+       STOP 
+    ENDIF
+
+    call create(A_dns,(i2-i1+1),(j2-j1+1))
+    A_dns%val=(0.d0,0.d0)
+
+    do i = i1, i2
+       do k = A_csr%rowpnt(i), A_csr%rowpnt(i+1)-1
+          if(A_csr%colind(k).ge.j1 .and. A_csr%colind(k).le.j2) then
+             A_dns%val(i-i1+1,A_csr%colind(k)-j1+1) = A_csr%nzval(k)
+          endif
+       enddo
+    enddo
+
+  end subroutine cextract_dns
+
+  !------------------------------------------------------------------------------
   !**************************************************************************
   !
   !  SUBROUTINE per la concatenazione di matrici sparse (concatena blocchi in place)
@@ -3637,5 +3669,32 @@ CONTAINS
 
   end subroutine zcsr2blk_sod
 
+  subroutine ccsr2blk_sod(Acsr,Ablk,indblk)
+
+        IMPLICIT NONE
+
+    INTEGER :: i
+    TYPE(c_CSR) :: Acsr
+    INTEGER :: nbl
+    TYPE(c_DNS), DIMENSION(:,:) :: Ablk
+    INTEGER, DIMENSION(:) :: indblk
+
+    nbl = size(Ablk,1)
+
+    DO i=1,nbl
+
+      CALL extract(Acsr,indblk(i),indblk(i+1)-1,indblk(i),indblk(i+1)-1,Ablk(i,i))
+
+    END DO
+
+    DO i=2,nbl
+
+      CALL extract(Acsr,indblk(i-1),indblk(i)-1,indblk(i),indblk(i+1)-1,Ablk(i-1,i))
+      CALL extract(Acsr,indblk(i),indblk(i+1)-1,indblk(i-1),indblk(i)-1,Ablk(i,i-1))
+
+    END DO
+
+
+  end subroutine ccsr2blk_sod
 
 end module sparsekit_drv
