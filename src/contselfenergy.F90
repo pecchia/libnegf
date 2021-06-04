@@ -174,11 +174,11 @@ contains
           Bo=E*SC%val(n1:n2,n3:n4)-HC%val(n1:n2,n3:n4)
           Co=conjg(E)*SC%val(n1:n2,n3:n4)-HC%val(n1:n2,n3:n4)
           Co=conjg(transpose(Co))
-!#:if defined("GPU")
-!          call decimation_gpu(pnegf,Go,Ao,Bo,Co,npl,.false.,ncyc)
-!#:else
+#:if defined("GPU")
+          call decimation_gpu(pnegf,Go,Ao,Bo,Co,npl,.false.,ncyc)
+#:else
           call decimation(Go,Ao,Bo,Co,npl,ncyc)
-!#:endif
+#:endif
           call log_deallocate(Ao)
           call log_deallocate(Bo)
           call log_deallocate(Co)

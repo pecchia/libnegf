@@ -28,21 +28,21 @@ module mpi_globals
 
 #:endif
 
-  INTEGER, SAVE ::  mpi_comm
-  INTEGER, SAVE ::  numprocs = 1
-  INTEGER, SAVE ::  id = 0
-  LOGICAL, SAVE ::  id0 = .true.
+  INTEGER ::  mpi_comm
+  INTEGER ::  numprocs = 1
+  INTEGER ::  id = 0
+  LOGICAL ::  id0 = .true.
 
 #:if defined("MPI")
 
   contains
 
-    subroutine negf_mpi_init(energyComm, ioProc)
-      type(mpifx_comm) :: energyComm
+    subroutine negf_mpi_init(comm, ioProc)
+      type(mpifx_comm) :: comm
       logical, optional :: ioProc
 
-      id =energyComm%rank
-      numprocs = energyComm%size
+      id = comm%rank
+      numprocs = comm%size
 
       if (present(ioProc)) then
         id0 = ioProc
