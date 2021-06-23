@@ -136,8 +136,6 @@ CONTAINS
     nbl = negf%str%num_PLs
     ncont = negf%str%num_conts
 
-    write(*,*) 'Routine: calculate_Gr'
-
     call build_ESH(negf, E, SelfEneR, ncont, nbl, ESH)
     
     !! Add interaction self energy contribution, if any
@@ -244,7 +242,6 @@ CONTAINS
     nbl = negf%str%num_PLs
     ncont = negf%str%num_conts
     ref = negf%refcont
-    write(*,*) 'Routine: calculate_Gn_neq_comp'
 
 
     Ec = cmplx(E,0.0_dp,dp)
@@ -418,7 +415,6 @@ CONTAINS
     ref = negf%refcont
     ref_blk = negf%str%cblk(ref)
    
-    write(*,*) 'Routine: iterative_meir_w'
     
     Ec=cmplx(E,0.0_dp,dp)
 
@@ -2945,7 +2941,6 @@ CONTAINS
     Integer :: nbl,ncont,ibl
     Integer :: i, ierr, icpl, nit, nft, nt, nt1
     
-    write(*,*) 'Routine: calculate_transmissions'
 
     nbl = str%num_PLs
     ncont = str%num_conts
@@ -3064,19 +3059,14 @@ CONTAINS
     nbl = str%num_PLs
     ncont = str%num_conts
     Im = 'I'
-    print*, 'build_ESH',id
 
     call build_ESH(negf, Ec, SelfEneR, ncont, nbl, ESH)
 
-    print*, 'allocate gsmr',id
     call allocate_gsm(gsmr,nbl)
-    print*, 'calculate gsmr',id
     call calculate_gsmr_blocks(negf,ESH,nbl,2,gsmr)
 
     call allocate_blk_dns(Gr,nbl)
-    write(*,*) 'calculate Gr11',id
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,1)
-    write(*,*) 'calculate Gr tridiag',id
     call calculate_Gr_tridiag_blocks(negf,ESH,gsml,gsmr,Gr,2,nbl)
     !Computation of transmission(s) between contacts ni(:) -> nf(:)
     do icpl=1,size(ni)
@@ -3088,10 +3078,8 @@ CONTAINS
        case(1)
           tun = 0.0_dp
        case(2)
-    write(*,*) 'calculate single transmission 2 conts', id
           call calculate_single_transmission_2_contacts(negf,nit,nft,ESH,SelfEneR,str%cblk,tun_proj,Gr,tun)
        case default
-    write(*,*) 'calculate single transmission N conts', id
           call calculate_single_transmission_N_contacts(negf,nit,nft,ESH,SelfEneR,str%cblk,tun_proj,gsmr,Gr,tun)
        end select
        TUN_MAT(icpl) = tun

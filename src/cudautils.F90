@@ -202,23 +202,24 @@ contains
 
   subroutine createGPU_sp(A)
     type(c_DNS), intent(in) :: A     
-    !$acc enter data create(A%val)
+    !$acc enter data create(A,A%val)
   end subroutine createGPU_sp
 
   subroutine createGPU_dp(A)
-    type(z_DNS), intent(in) :: A     
-    !$acc enter data create(A%val)
+    type(z_DNS), intent(in) :: A
+
+    !$acc enter data create(A,A%val)
   end subroutine createGPU_dp
   ! ------------------------------------------------------------------
 
   subroutine copyToGPU_dns_sp(A)
     type(c_DNS), intent(in) :: A     
-    !$acc enter data copyin(A%val)
+    !$acc enter data copyin(A,A%val)
   end subroutine copyToGPU_dns_sp
 
   subroutine copyToGPU_dns_dp(A)
     type(z_DNS), intent(in) :: A     
-    !$acc enter data copyin(A%val)
+    !$acc enter data copyin(A,A%val)
   end subroutine copyToGPU_dns_dp
 
   subroutine copyToGPU_real_sp(r)
@@ -262,7 +263,7 @@ contains
   end subroutine copyToGPU_comp_mat_dp
 
   subroutine copyToGPU_logic_vec(V)
-    logical, dimension(:), intent(in) :: V     
+    logical, dimension(:), intent(in) :: V
     !$acc enter data copyin(V)
   end subroutine copyToGPU_logic_vec
 
@@ -301,12 +302,12 @@ contains
 
   subroutine deleteGPU_dns_sp(A)
     type(c_DNS), intent(inout) :: A     
-    !$acc exit data delete(A%val)
+    !$acc exit data delete(A%val,A)
   end subroutine deleteGPU_dns_sp
 
   subroutine deleteGPU_dns_dp(A)
     type(z_DNS), intent(inout) :: A     
-    !$acc exit data delete(A%val)
+    !$acc exit data delete(A%val,A)
   end subroutine deleteGPU_dns_dp
 
    subroutine deleteGPU_logic_vec(V)
@@ -472,12 +473,12 @@ contains
     !
     integer :: istat, n
 
-    n=size(Mat,1)
+    n=size(Mat)
 
     !$acc data present(Mat)
     !$acc host_data use_device(Mat)
     summ = 0.0_sp
-    istat=cublasScasum(hcublas, n*n, Mat, 1, summ)
+    istat=cublasScasum(hcublas, n, Mat, 1, summ)
     !$acc end host_data
     !$acc end data
   end subroutine sum_gpu_sp
@@ -490,11 +491,11 @@ contains
     !
     integer :: istat, n
 
-    n=size(Mat,1)
+    n=size(Mat)
     !$acc data present(Mat)
     !$acc host_data use_device(Mat)
     summ = 0.0_dp
-    istat=cublasDzasum(hcublas, n*n, Mat, 1, summ)
+    istat=cublasDzasum(hcublas, n, Mat, 1, summ)
     !$acc end host_data
     !$acc end data
   end subroutine sum_gpu_dp
