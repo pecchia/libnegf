@@ -38,8 +38,7 @@ module lib_param
   use libmpifx_module, only : mpifx_comm
 #:endif
 #:if defined("GPU")
-  use cublas_v2
-  use cusolverDn
+  use iso_c_binding
 #:endif
   implicit none
   private
@@ -57,7 +56,18 @@ module lib_param
     integer, dimension(:), allocatable :: indexes
   end type intArray
 
+#:if defined("GPU")
+  type, bind(C) :: cublasHandle
+    type(c_ptr) :: handle
+  end type cublasHandle
 
+  type, bind(C) :: cusolverDnHandle
+    type(c_ptr) :: handle
+  end type cusolverDnHandle
+
+  public :: cusolverDnHandle
+  public :: cublasHandle
+#:endif
  !! Structure used to define energy points for the integration
  !! For every point we define
  !!     path (1,2 or 3): the energy point belongs to a real axis
