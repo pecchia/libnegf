@@ -719,7 +719,6 @@ contains
 
              !Gn(i,i-1)  = Gr(i, cb) Gam(cb) Gr(i-1, cb)^+
              call createAll(work3, Gam%nrow, Gr(i-1,cb)%nrow)
-             call matmul_gpu_dag(hh, one, Gam%val, Gr(i-1,cb)%val, zero, work3%val)
              call createAll(GA, Gr(i-1,cb)%ncol, Gr(i-1,cb)%nrow)
              call dagger_gpu(Gr(i-1,cb)%val, GA%val)
              call matmul_gpu(hh, one, Gam%val, GA%val, zero, work3%val)
@@ -861,7 +860,6 @@ contains
 
              !Gn(i,i-1)  = Gr(i, cb) Gam(cb) Gr(i-1, cb)^+
              call createAll(work3, Gam%nrow, Gr(i-1,cb)%nrow)
-             call matmul_gpu_dag(hh, one, Gam%val, Gr(i-1,cb)%val, zero, work3%val)
              call createAll(GA, Gr(i-1,cb)%ncol, Gr(i-1,cb)%nrow)
              call dagger_gpu(Gr(i-1,cb)%val, GA%val)
              call matmul_gpu(hh, one, Gam%val, GA%val, zero, work3%val)
