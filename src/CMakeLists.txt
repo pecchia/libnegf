@@ -31,13 +31,16 @@ set(sources-fpp
   elphdb.F90
   elphds.F90)
 
+set(sources-c gpuroutines.cu)
+
 if(WITH_INELASTIC)
   list(APPEND sources-fpp transform.F90)
 endif()
 if(WITH_TRANSPORT_GPU)
   list(APPEND sources-fpp cudautils.F90)
   list(APPEND sources-fpp iterative_gpu.F90)
-  list(APPEND sources-fpp cublas_interface.F90)
+  #list(APPEND sources-fpp gpuroutines.cu)
+  #list(APPEND sources-fpp cublas_interface.F90)
 else()
   list(APPEND sources-fpp iterative_cpu.F90)
 endif()
@@ -71,7 +74,7 @@ foreach(fppsrc IN LISTS sources-fpp)
   list(APPEND sources-fpp-f90 ${CMAKE_CURRENT_BINARY_DIR}/${f90src})
 endforeach()
 
-add_library(negf ${sources-fpp-f90} ${sources-f90} $<TARGET_OBJECTS:sparskit_objlib>)
+add_library(negf ${sources-fpp-f90} ${sources-f90} ${sources-c} $<TARGET_OBJECTS:sparskit_objlib>)
 
 target_sources(negf PRIVATE $<TARGET_OBJECTS:syscalls_objlib>)
 target_include_directories(negf PUBLIC
