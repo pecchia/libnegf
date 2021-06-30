@@ -499,7 +499,7 @@ end interface
 
       complex(sp) :: alpha, beta
 
-      alpha = cmplx(1.0, 0.0, sp)
+      alpha = cmplx(0.0, 1.0, sp)
       beta = cmplx(0.0, -1.0, sp)
       
       call matsum_gpu_sp(hcublas, alpha, G_in, beta, G_in, G_out, 'dag_2nd')
@@ -623,7 +623,7 @@ end interface
 
       complex(dp) :: alpha, beta
 
-      alpha = cmplx(1.0, 0.0, dp)
+      alpha = cmplx(0.0, 1.0, dp)
       beta = cmplx(0.0, -1.0, dp)
       
       call matsum_gpu_dp(hcublas, alpha, G_in, beta, G_in, G_out, 'dag_2nd')
