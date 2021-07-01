@@ -443,7 +443,7 @@ contains
 
              call createAll(work3, work2%nrow, ESH(sbl-1,sbl)%ncol)
              call matmul_gpu(hh, one, work2, ESH(sbl-1,sbl), zero, work3)
-             call mat_sum_gpu(hh, one, ESH(sbl,sbl), mone, work3, work1)
+             call matsum_gpu(hh, one, ESH(sbl,sbl), mone, work3, work1)
 
              call destroyAll(work2)
              call destroyAll(work3)
