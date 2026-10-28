@@ -282,10 +282,8 @@ contains
              endif
              call matmul_gpu(hh, one, work2, ESH(sbl+1,sbl), zero, work3)
 
-             call createGPU_async(ESH(sbl,sbl))
-             call copyToGPU_async(ESH(sbl,sbl))
-             call matsum_gpu(hh, one, ESH(sbl,sbl), mone, work3, work1)
-             call deleteGPU_async(ESH(sbl,sbl))
+             ! work1 already holds ESH(sbl,sbl): work1 = work1 - work3 in place
+             call matsum_gpu(hh, one, work1, mone, work3, work1)
 
              call deleteGPU_async(work2)
              call deleteGPU_async(work3)
@@ -312,7 +310,7 @@ contains
           call createGPU_async(Gr(i,i-1))
           @:ASSERT(c_associated(ESH(i,i-1)%d_addr))
           call matmul_gpu(hh, one, gsmr(i), ESH(i,i-1), zero, work1)
-          call deleteGPU_async(ESH(i,i-1))
+          if (.not. negf%tKeepESHonGPU) call deleteGPU_async(ESH(i,i-1))
           call matmul_gpu(hh, mone, work1, Gr(i-1,i-1), zero, Gr(i,i-1))
           call deleteGPU_async(work1)
 
@@ -321,7 +319,7 @@ contains
           call createGPU_async(Gr(i-1,i))
           @:ASSERT(c_associated(ESH(i-1,i)%d_addr))
           call matmul_gpu(hh, one, ESH(i-1,i), gsmr(i), zero, work2)
-          call deleteGPU_async(ESH(i-1,i))
+          if (.not. negf%tKeepESHonGPU) call deleteGPU_async(ESH(i-1,i))
           call matmul_gpu(hh, mone, Gr(i-1,i-1), work2, zero, Gr(i-1,i))
 
           call createGPU_only_async(work1, Gr(i,i-1)%nrow, work2%ncol)
@@ -423,6 +421,9 @@ contains
   ! ---------------------------------------------------------------------------------
 #:def calculate_Gn_tridiag_blocks_template(KIND, CTYPE, MTYPE, CUDATYPE)
   subroutine calculate_Gn_tridiag_blocks_${KIND}$(negf,ESH,SelfEneR,frm,ref,struct,gsmr,Gr,Gn)
+
+    use iso_c_binding, only : c_associated
+
     type(TNegf), intent(in) :: negf
     type(${MTYPE}$), dimension(:,:), intent(inout) :: ESH, Gr
     type(${MTYPE}$), dimension(:), intent(in) :: SelfEneR, gsmr
@@ -488,14 +489,18 @@ contains
 
     do i = 1, nbl-1
 
+        ! ESH(i+1,i) is copied once and used twice in this iteration
+        ! (already on GPU if negf%tKeepESHonGPU)
+        if (.not. c_associated(ESH(i+1,i)%d_addr)) then
+          call createGPU_async(ESH(i+1,i))
+          call copyToGPU_async(ESH(i+1,i))
+        end if
+
         call createAll(work1, Sigma_n(i+1,i)%nrow, Gr(i,i)%nrow)
         call matmul_gpu(hh, one, Sigma_n(i+1,i), Gr(i,i), zero, work1, 'dag_2nd')
         call matmul_gpu(hh, one, Sigma_n(i+1,i+1), Gr(i,i+1), one, work1, 'dag_2nd')
 
-        call createGPU(ESH(i+1,i))
-        call copyToGPU(ESH(i+1,i))
         call matmul_gpu(hh, minusOne, ESH(i+1,i), Gn(i,i), one, work1)
-        call deleteGPU(ESH(i+1,i))
 
         call matmul_gpu(hh, one, gsmr(i+1), work1, zero, Gn(i+1,i))
         call destroyAll(work1)
@@ -507,11 +512,9 @@ contains
 
         call matmul_gpu(hh, one,Sigma_n(i+1,i+1), Gr(i+1,i+1), one, work1, 'dag_2nd')
 
-        call createGPU(ESH(i+1,i))
-        call copyToGPU(ESH(i+1,i))
         call matmul_gpu(hh, minusOne, ESH(i+1,i), Gn(i,i+1), one, work1)
-        call deleteGPU(ESH(i+1,i))
 
+        if (.not. negf%tKeepESHonGPU) call deleteGPU_async(ESH(i+1,i))
 
         call matmul_gpu(hh, one,gsmr(i+1), work1, zero, Gn(i+1,i+1))
         call destroyAll(work1)
@@ -542,16 +545,19 @@ contains
       call destroyAll(work1)
 
       do i = nbl-1, 1, -1
+        ! ESH(i,i+1) is copied once and used three times in this iteration
+        ! (already on GPU if negf%tKeepESHonGPU)
+        if (.not. c_associated(ESH(i,i+1)%d_addr)) then
+          call createGPU_async(ESH(i,i+1))
+          call copyToGPU_async(ESH(i,i+1))
+        end if
+
         !work1 = Tr(i,i+1) gns(i+1) Ta(i+1,i)
         ! Tr(i,i+1) = ESH(i,i+1);  Ta(i+1,i) = ESH(i,i+1)^dag
         call createAll(work, ESH(i,i+1)%nrow, gns%ncol)
 
-
-        call createGPU(ESH(i,i+1))
-        call copyToGPU(ESH(i,i+1))
         call matmul_gpu(hh, one, ESH(i,i+1), gns, zero, work)
         call matmul_gpu(hh, one, work, ESH(i,i+1), one, Sigma_n(i,i), 'dag_2nd')
-        call deleteGPU(ESH(i,i+1))
 
         call destroyAll(work)
         call destroyAll(gns)
@@ -560,20 +566,15 @@ contains
         call createAll(work, Sigma_n(i,i+1)%nrow, gsmr(i+1)%ncol)
 
         call matmul_gpu(hh, one, Sigma_n(i,i+1), gsmr(i+1), zero, work, 'dag_2nd')
-        call createGPU(ESH(i,i+1))
-        call copyToGPU(ESH(i,i+1))
         call matmul_gpu(hh, minusOne, work, ESH(i,i+1), one, Sigma_n(i,i), 'dag_2nd')
-        call deleteGPU(ESH(i,i+1))
 
         call destroyAll(work)
 
         !work3 = ESH(i,i+1) gsmr(i+1) Sigma(i+1,i)
         call createAll(work, ESH(i,i+1)%nrow, gsmr(i+1)%ncol)
 
-        call createGPU(ESH(i,i+1))
-        call copyToGPU(ESH(i,i+1))
         call matmul_gpu(hh, one, ESH(i,i+1), gsmr(i+1), zero, work)
-        call deleteGPU(ESH(i,i+1))
+        if (.not. negf%tKeepESHonGPU) call deleteGPU_async(ESH(i,i+1))
         call matmul_gpu(hh, minusOne, work, Sigma_n(i+1,i), one, Sigma_n(i,i))
 
         call destroyAll(work)

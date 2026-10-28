@@ -28,13 +28,14 @@ Module block_3_diag
   use mpi_globals
   use sparsekit_drv, only: extract
 #:if defined("GPU")
-  use cudautils, only: createAll, destroyAll
+  use cudautils, only: createAll, destroyAll, clearAll
 #:endif
   implicit none
   private
 
 public :: init_tridiag_blk
 public :: destroy_tridiag_blk
+public :: clear_tridiag_blk
 public :: blk2dns
 public :: dns2blk
 public :: csr2blk3diag
@@ -48,7 +49,41 @@ interface destroy_tridiag_blk
    module procedure destroy_tridiag_blk_3d
 end interface
 
+interface clear_tridiag_blk
+   module procedure clear_tridiag_blk_2d
+end interface
+
+
 contains
+
+!**********************************************************************
+ subroutine clear_tridiag_blk_2d(M, str)
+    type(z_DNS), dimension(:,:), allocatable :: M
+    character(len=*), intent(in), optional :: str
+
+    integer :: i, nbl
+
+    if (.not.allocated(M)) return
+
+    nbl=size(M,1)
+
+#:if defined("GPU")
+    call clearAll(M(1,1))
+    do i=2,nbl
+      call clearAll(M(i,i))
+      call clearAll(M(i-1,i))
+      call clearAll(M(i,i-1))
+    end do
+#:else
+    call clear(M(1,1))
+    do i=2,nbl
+      call clear(M(i,i))
+      call clear(M(i-1,i))
+      call clear(M(i,i-1))
+    end do
+#:endif
+
+ end subroutine clear_tridiag_blk_2d
 
  !**********************************************************************
  subroutine destroy_tridiag_blk_2d(M, str)

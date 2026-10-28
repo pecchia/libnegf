@@ -45,6 +45,8 @@ module cudautils
    public :: deleteGPU_async
    public :: createAll
    public :: destroyAll
+   public :: clearGPU
+   public :: clearAll
    public :: waitForGPU
 
    public :: copy_trid_toGPU
@@ -52,6 +54,7 @@ module cudautils
    public :: copy_vdns_toGPU
    public :: delete_vdns_fromGPU
    public :: delete_trid_fromGPU
+   public :: clear_trid_fromGPU
 
    public :: matmul_gpu
    public :: inverse_gpu
@@ -120,6 +123,18 @@ module cudautils
    #:endfor
    end interface destroyAll
 
+   interface clearGPU
+   #:for PREC in PRECISIONS
+      module procedure clearGPU_${PREC_ABBREVS[PREC]}$
+   #:endfor
+   end interface clearGPU
+
+   interface clearAll
+   #:for PREC in PRECISIONS
+      module procedure clearAll_${PREC_ABBREVS[PREC]}$
+   #:endfor
+   end interface clearAll
+
    interface copyToGPU
    #:for PREC in PRECISIONS
       module procedure copyToGPU_${PREC_ABBREVS[PREC]}$
@@ -167,6 +182,12 @@ module cudautils
       module procedure delete_trid_fromGPU_${PREC_ABBREVS[PREC]}$
    #:endfor
    end interface delete_trid_fromGPU
+
+   interface clear_trid_fromGPU
+   #:for PREC in PRECISIONS
+      module procedure clear_trid_fromGPU_${PREC_ABBREVS[PREC]}$
+   #:endfor
+   end interface clear_trid_fromGPU
 
    interface matmul_gpu
    #:for PREC in PRECISIONS
@@ -327,6 +348,12 @@ module cudautils
        type(c_ptr), value :: d_A
        integer(c_size_t), value :: siz
      end function cu_copyMatH2D_async
+
+     integer(c_int) function cu_clearMat(d_A, siz) bind(C, name='cu_clearMat')
+       use iso_c_binding
+       type(c_ptr), value :: d_A
+       integer(c_size_t), value :: siz
+     end function cu_clearMat
 
      integer(c_int) function cu_deleteMat(d_A) bind(C, name='cu_deleteMat')
        use iso_c_binding
@@ -635,6 +662,27 @@ end interface
    end subroutine destroyAll_${KIND}$
 #:enddef destroyAll_template
 
+#:def clearGPU_template(KIND, CTYPE, MTYPE, CUDATYPE)
+   ! Zero the device copy of A, keeping the allocation
+   subroutine clearGPU_${KIND}$(A)
+     type(${MTYPE}$), intent(in) :: A
+     integer :: err
+     integer(c_size_t) :: bytecount
+     bytecount = int(A%nrow,kind=c_size_t)*int(A%ncol,kind=c_size_t)*${CUDATYPE}$
+     err = cu_clearMat(A%d_addr, bytecount)
+     @:ASSERT(err == 0)
+   end subroutine clearGPU_${KIND}$
+#:enddef clearGPU_template
+
+#:def clearAll_template(KIND, CTYPE, MTYPE, CUDATYPE)
+   ! Zero both host and device copies of A, keeping the allocations
+   subroutine clearAll_${KIND}$(A)
+     type(${MTYPE}$) :: A
+     call clearGPU(A)
+     call clear(A)
+   end subroutine clearAll_${KIND}$
+#:enddef clearAll_template
+
 !~-~-~-~-~-~-~-~-~-~-~-~ MATRIX COMPUTATION ROUTINES  ~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-~-
 
    ! C = alpha*A*B + beta*C
@@ -902,6 +950,21 @@ end interface
   end subroutine delete_trid_fromGPU_${KIND}$
 #:enddef delete_trid_fromGPU_template
 
+#:def clear_trid_fromGPU_template(KIND, CTYPE, MTYPE, CUDATYPE)
+  subroutine clear_trid_fromGPU_${KIND}$(M)
+    type(${MTYPE}$), dimension(:,:), intent(inout) :: M
+    integer :: ii, nbl
+
+    nbl = size(M,1)
+    call clearGPU(M(1,1))
+    do ii=2,nbl
+       call clearGPU(M(ii,ii))
+       call clearGPU(M(ii-1,ii))
+       call clearGPU(M(ii,ii-1))
+    end do
+  end subroutine clear_trid_fromGPU_${KIND}$
+#:enddef clear_trid_fromGPU_template
+
 #:def copy_trid_toHOST_template(KIND, CTYPE, MTYPE, CUDATYPE)
   subroutine copy_trid_toHOST_${KIND}$(M)
     type(${MTYPE}$), dimension(:,:), intent(inout) :: M
@@ -1019,6 +1082,10 @@ end interface
 
      $:destroyAll_template(KIND, CTYPE, MTYPE, CUDATYPE)
 
+     $:clearGPU_template(KIND, CTYPE, MTYPE, CUDATYPE)
+
+     $:clearAll_template(KIND, CTYPE, MTYPE, CUDATYPE)
+
      $:matmul_gpu_template(KIND, CTYPE, MTYPE, CUDATYPE)
 
      $:inverse_gpu_template(KIND, CTYPE, MTYPE, CUDATYPE)
@@ -1040,6 +1107,8 @@ end interface
      $:copy_trid_toGPU_template(KIND, CTYPE, MTYPE, CUDATYPE)
 
      $:delete_trid_fromGPU_template(KIND, CTYPE, MTYPE, CUDATYPE)
+
+     $:clear_trid_fromGPU_template(KIND, CTYPE, MTYPE, CUDATYPE)
 
      $:copy_trid_toHOST_template(KIND, CTYPE, MTYPE, CUDATYPE)
 

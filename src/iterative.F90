@@ -24,9 +24,9 @@ module iterative
   use ln_constants, only : pi, i_unit => j, minusOne
   use ln_allocation
   use ln_messages
-  use mat_def, only : z_DNS, z_CSR, r_CSR, create, destroy, assignment(=)
+  use mat_def, only : z_DNS, z_CSR, r_CSR, create, destroy, clear, assignment(=)
   use block_3_diag, only : init_tridiag_blk, destroy_tridiag_blk, blk2dns
-  use block_3_diag, only : csr2blk3diag
+  use block_3_diag, only : csr2blk3diag, clear_tridiag_blk
   use sparsekit_drv
   use inversions
   use ln_structure, only : TStruct_Info
@@ -62,6 +62,7 @@ module iterative
   public :: transmission_BP_corrected
 
   public :: destroy_all_blk
+  public :: clear_all_blk
 
   logical, parameter :: debug=.false.
   ! These are here temporarily ...
@@ -234,6 +235,10 @@ CONTAINS
     call add_sigma_r(negf, ESH)
     call stop_timer(negf, timers%BuildESH)
 
+#:if defined("GPU")
+    negf%tKeepESHonGPU = fits_ESH_on_GPU(ESH)
+#:endif
+
     call allocate_gsm(gsmr,nbl)
     call calculate_gsmr_blocks(negf,ESH,nbl,2,gsmr)
 
@@ -257,6 +262,12 @@ CONTAINS
     call init_tridiag_blk(Gn,ESH)
 
     call calculate_Gn_tridiag_blocks(negf,ESH,SelfEneR,frm,ref,negf%str,gsmr,Gr,Gn)
+
+#:if defined("GPU")
+    ! Release ESH blocks kept on GPU by gsmr/Gr/Gn
+    call delete_trid_fromGPU(ESH)
+    negf%tKeepESHonGPU = .false.
+#:endif
 
     call destroy_gsm(gsmr)
     call deallocate_gsm(gsmr)
@@ -917,7 +928,7 @@ CONTAINS
   ! depending on negf%tDestroyTAG   TAG = Gn, Gr, ESH
   !
   ! NOTE: We always remove from GPU
-  ! destroy_tridiag_blk: destroy only from CPU
+  ! destroy_tridiag_blk: destroy from CPU and GPU
   ! delete_trid_fromGPU: destroy only from GPU
   ! detroy_blk: destroy from both CPU and GPU
   ! deallocate_blk_dns: deallocation wrapper with error checking
@@ -957,23 +968,51 @@ CONTAINS
 #:endif
     end if
 
-    !
+  end subroutine destroy_all_blk
+
+    !**********************************************************************
+  ! Wrapper code that conditionally deallocates block-arrays
+  ! depending on negf%tDestroyTAG   TAG = Gn, Gr, ESH
+  !
+  ! NOTE: We always remove from GPU
+  ! destroy_tridiag_blk: destroy from CPU and GPU
+  ! delete_trid_fromGPU: destroy only from GPU
+  ! detroy_blk: destroy from both CPU and GPU
+  ! deallocate_blk_dns: deallocation wrapper with error checking
+  !
+  !**********************************************************************
+  subroutine clear_all_blk(negf)
+    type(Tnegf), intent(in) :: negf
+
+    ! NOTE: ESH is currently *not* on the GPU
+    !       => we do not clear GPU mem
+    if (negf%tDestroyESH) then
+      if (allocated(ESH)) then
+        call clear_tridiag_blk(ESH)
+      end if
+    end if
+
     if (negf%tDestroyGr) then
       if (allocated(Gr)) then
-        #:if defined("GPU")
-          call delete_trid_fromGPU(Gr)
-        #:endif
-        call destroy_tridiag_blk(Gr)
-        call deallocate_blk_dns(Gr)
+        call clear_tridiag_blk(Gr)
       end if
     else
 #:if defined("GPU")
-      call delete_trid_fromGPU(Gr)
+      call clear_trid_fromGPU(Gr)
 #:endif
     end if
 
+    if (negf%tDestroyGn) then
+      if (allocated(Gn)) then
+        call clear_tridiag_blk(Gn)
+      end if
+    else
+#:if defined("GPU")
+      call clear_trid_fromGPU(Gn)
+#:endif
+    end if
 
-  end subroutine destroy_all_blk
+  end subroutine clear_all_blk
 
   !**********************************************************************
   ! Destroy blocks of gsm from CPU and GPU
@@ -998,6 +1037,59 @@ CONTAINS
     end do
 #:endif
   end subroutine destroy_gsm
+
+  !**********************************************************************
+  ! Clear (zero) blocks of gsm on CPU and GPU, keeping the storage
+  !**********************************************************************
+  subroutine clear_gsm(gsm)
+    type(z_DNS), dimension(:) :: gsm
+    integer :: i, nbl
+
+    nbl=size(gsm,1)
+
+#:if defined("GPU")
+    do i=1,nbl
+       call clearAll(gsm(i))
+    end do
+#:else
+    do i=1,nbl
+       call clear(gsm(i))
+    end do
+#:endif
+  end subroutine clear_gsm
+
+#:if defined("GPU")
+  !**********************************************************************
+  ! Decide whether the off-diagonal ESH blocks can stay on GPU during
+  ! gsmr, Gr and Gn. The working set (gsmr, Gr, Gn, Sigma_n and work
+  ! blocks) is bounded by 5 block-tridiagonal matrices.
+  !**********************************************************************
+  function fits_ESH_on_GPU(ESH) result(fits)
+    type(z_DNS), dimension(:,:), intent(in) :: ESH
+    logical :: fits
+
+    real(dp), parameter :: memFraction = 0.8_dp
+    integer(8), parameter :: elemBytes = 16
+    integer(8) :: freemem, totalmem, offdiag, trid
+    integer :: i, nbl
+
+    nbl = size(ESH,1)
+    trid = 0
+    offdiag = 0
+    do i = 1, nbl
+      trid = trid + int(ESH(i,i)%nrow,8)*int(ESH(i,i)%ncol,8)
+    end do
+    do i = 2, nbl
+      offdiag = offdiag + int(ESH(i-1,i)%nrow,8)*int(ESH(i-1,i)%ncol,8) &
+          & + int(ESH(i,i-1)%nrow,8)*int(ESH(i,i-1)%ncol,8)
+    end do
+    trid = trid + offdiag
+
+    call getDevMemInfo(freemem, totalmem)
+    fits = (real(elemBytes*(offdiag + 5*trid),dp) < memFraction*real(freemem,dp))
+
+  end function fits_ESH_on_GPU
+#:endif
 
 
   !***********************************************************************

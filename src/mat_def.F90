@@ -33,7 +33,7 @@ public :: c_DNS, s_CSR, c_CSR! single precision defs
 public :: r_DNS3, z_DNS3, c_DNS3 ! three indeces matrix (used for storage)
 public :: set_CSR
 
-public :: create, initialize, recreate, destroy, create_id
+public :: create, initialize, recreate, destroy, clear, create_id
 public :: print_mat, read_mat, writemem
 public :: createp, destroyp
 public :: assignment(=)
@@ -114,6 +114,11 @@ end interface
 
 interface destroyp
    module procedure zdestroy_pCSR
+end interface
+
+interface clear
+   module procedure zclear_DNS
+   module procedure cclear_DNS
 end interface
 
 interface print_mat
@@ -1456,7 +1461,23 @@ subroutine cdestroy_DNS(mat1,mat2,mat3,mat4,mat5,mat6,mat7,mat8,tag)
 
 end subroutine cdestroy_DNS
 
+! ------------------------------------------------------------------
+! ==================================================================
+subroutine zclear_DNS(mat1)
+   type(z_DNS) :: mat1
 
+   if(allocated(mat1%val)) then
+      mat1%val = cmplx(0.0, 0.0, dp)
+   end if   
+end subroutine zclear_DNS
+
+subroutine cclear_DNS(mat1)
+   type(c_DNS) :: mat1
+
+   if(allocated(mat1%val)) then
+      mat1%val = cmplx(0.0, 0.0, sp)
+   end if   
+end subroutine cclear_DNS
 
 ! ------------------------------------------------------------------
 ! ==================================================================

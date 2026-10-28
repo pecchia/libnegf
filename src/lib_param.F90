@@ -123,6 +123,8 @@ module lib_param
    integer :: devnum            ! Device Number
    integer(C_SIZE_T) :: freemem   ! Amount of free mem on GPU
    integer(C_SIZE_T) :: totalmem  ! Total memory on GPU
+   ! Keep off-diagonal ESH blocks on GPU across gsmr, Gr and Gn (set per energy point)
+   logical :: tKeepESHonGPU = .false.
 #:endif
     integer  :: ReadoldDM_SGFs    ! 0: Read 1: compute 2: comp & save
     integer  :: ReadoldT_SGFs     ! 0: Read 1: compute 2: comp & save
