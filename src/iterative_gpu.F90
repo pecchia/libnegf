@@ -526,70 +526,46 @@ contains
 
     contains
     ! Recursive calculation of Sigma_n:
-    ! gns(i+1) = gsmr(i+1) Sigma(i+1,i+1) gsmr(i+1)^dag
     ! Sigma(i,i) = Sigma(i,i) + Tr(i,i+1) gns(i+1) Ta(i+1,i)
     !                         - Tr(i,i+1) gsmr(i+1) Sigma(i+1,i)
     !                         - Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)]
+    ! with gns(i+1) = gsmr(i+1) Sigma(i+1,i+1) gsmr(i+1)^dag.
+    ! Using Y = Tr(i,i+1) gsmr(i+1) and Sigma(i,i+1) = Sigma(i+1,i)^dag:
+    ! Sigma(i,i) = Sigma(i,i) + Y Sigma(i+1,i+1) Y^dag - X - X^dag,  X = Y Sigma(i+1,i)
+    ! 4 matrix products per block instead of 8 (gns is never formed)
     !
     subroutine calculate_sigma_n()
-      !Work
-      type(${MTYPE}$) :: work, gns
+      !Work: device-only temporaries
+      type(${MTYPE}$) :: Y, Z, X
 
       ! if nbl = 1 => Sigma_n(1,1) is ready
       if (nbl.eq.1) return
-      !g^n(nbl) = gsmr(nbl) Sigma(nbl,nbl) gsma(nbl)
-      call createAll(work1, gsmr(nbl)%nrow, Sigma_n(nbl,nbl)%ncol)
-      call createAll(gns, work1%nrow, gsmr(nbl)%nrow)
-      call matmul_gpu(hh, one, gsmr(nbl), Sigma_n(nbl,nbl), zero, work1)
-      call matmul_gpu(hh, one, work1, gsmr(nbl), zero, gns, 'dag_2nd')
-      call destroyAll(work1)
 
       do i = nbl-1, 1, -1
-        ! ESH(i,i+1) is copied once and used three times in this iteration
-        ! (already on GPU if negf%tKeepESHonGPU)
+        ! (ESH(i,i+1) already on GPU if negf%tKeepESHonGPU)
         if (.not. c_associated(ESH(i,i+1)%d_addr)) then
           call createGPU_async(ESH(i,i+1))
           call copyToGPU_async(ESH(i,i+1))
         end if
 
-        !work1 = Tr(i,i+1) gns(i+1) Ta(i+1,i)
-        ! Tr(i,i+1) = ESH(i,i+1);  Ta(i+1,i) = ESH(i,i+1)^dag
-        call createAll(work, ESH(i,i+1)%nrow, gns%ncol)
-
-        call matmul_gpu(hh, one, ESH(i,i+1), gns, zero, work)
-        call matmul_gpu(hh, one, work, ESH(i,i+1), one, Sigma_n(i,i), 'dag_2nd')
-
-        call destroyAll(work)
-        call destroyAll(gns)
-
-        !work2 = Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)
-        call createAll(work, Sigma_n(i,i+1)%nrow, gsmr(i+1)%ncol)
-
-        call matmul_gpu(hh, one, Sigma_n(i,i+1), gsmr(i+1), zero, work, 'dag_2nd')
-        call matmul_gpu(hh, minusOne, work, ESH(i,i+1), one, Sigma_n(i,i), 'dag_2nd')
-
-        call destroyAll(work)
-
-        !work3 = ESH(i,i+1) gsmr(i+1) Sigma(i+1,i)
-        call createAll(work, ESH(i,i+1)%nrow, gsmr(i+1)%ncol)
-
-        call matmul_gpu(hh, one, ESH(i,i+1), gsmr(i+1), zero, work)
+        ! Y = Tr(i,i+1) gsmr(i+1);  Tr(i,i+1) = ESH(i,i+1)
+        call createGPU_only_async(Y, ESH(i,i+1)%nrow, gsmr(i+1)%ncol)
+        call matmul_gpu(hh, one, ESH(i,i+1), gsmr(i+1), zero, Y)
         if (.not. negf%tKeepESHonGPU) call deleteGPU_async(ESH(i,i+1))
-        call matmul_gpu(hh, minusOne, work, Sigma_n(i+1,i), one, Sigma_n(i,i))
 
-        call destroyAll(work)
+        ! Sigma(i,i) += Y Sigma(i+1,i+1) Y^dag  (= Tr gns(i+1) Ta)
+        call createGPU_only_async(Z, Y%nrow, Sigma_n(i+1,i+1)%ncol)
+        call matmul_gpu(hh, one, Y, Sigma_n(i+1,i+1), zero, Z)
+        call matmul_gpu(hh, one, Z, Y, one, Sigma_n(i,i), 'dag_2nd')
+        call deleteGPU_async(Z)
 
-        if (i > 1) then
-          !gns(i) = gsmr(i) * Sigma_n(i,i) * gsmr^dag(i)
-          call createAll(work, gsmr(i)%nrow, Sigma_n(i,i)%ncol)
-          call createAll(gns, work%nrow, gsmr(i)%nrow)
-
-          call matmul_gpu(hh, one, gsmr(i), Sigma_n(i,i), zero, work)
-          call matmul_gpu(hh, one, work, gsmr(i), zero, gns, 'dag_2nd')
-
-          call destroyAll(work)
-        end if
-
+        ! Sigma(i,i) -= X + X^dag;  X^dag = Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)
+        call createGPU_only_async(X, Y%nrow, Sigma_n(i+1,i)%ncol)
+        call matmul_gpu(hh, one, Y, Sigma_n(i+1,i), zero, X)
+        call deleteGPU_async(Y)
+        call matsum_gpu(hh, one, Sigma_n(i,i), minusOne, X, Sigma_n(i,i))
+        call matsum_gpu(hh, one, Sigma_n(i,i), minusOne, X, Sigma_n(i,i), 'dag_2nd')
+        call deleteGPU_async(X)
       end do
 
     end subroutine calculate_sigma_n

@@ -321,50 +321,36 @@ contains
 
     contains
     ! Recursive calculation of Sigma_n:
-    ! gns(i+1) = gsmr(i+1) Sigma(i+1,i+1) gsmr(i+1)^dag
     ! Sigma(i,i) = Sigma(i,i) + Tr(i,i+1) gns(i+1) Ta(i+1,i)
     !                         - Tr(i,i+1) gsmr(i+1) Sigma(i+1,i)
     !                         - Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)]
+    ! with gns(i+1) = gsmr(i+1) Sigma(i+1,i+1) gsmr(i+1)^dag.
+    ! Using Y = Tr(i,i+1) gsmr(i+1) and Sigma(i,i+1) = Sigma(i+1,i)^dag:
+    ! Sigma(i,i) = Sigma(i,i) + Y Sigma(i+1,i+1) Y^dag - X - X^dag,  X = Y Sigma(i+1,i)
+    ! 4 matrix products per block instead of 8 (gns is never formed)
     !
     subroutine calculate_sigma_n()
       !Work
-      type(z_DNS) :: work, gns, gsmrDag, ESHdag
+      type(z_DNS) :: Y, Ydag, Z, X, Xdag
 
       ! if nbl = 1 => Sigma_n(1,1) is ready
       if (nbl.eq.1) return
-      !g^n(nbl) = gsmr(nbl) Sigma(nbl,nbl) gsma(nbl)
-      call zdagger(gsmr(nbl),gsmrDag)
-      call prealloc_mult(gsmr(nbl), Sigma_n(nbl,nbl), work1)
-      call prealloc_mult(work1, gsmrDag, gns)
-      call destroy(gsmrDag, work1)
 
       do i = nbl-1, 1, -1
-        !work1 = Tr(i,i+1) gns(i+1) Ta(i+1,i)
-        ! Tr(i,i+1) = ESH(i,i+1);  Ta(i+1,i) = ESH(i,i+1)^dag
-        call zdagger(ESH(i,i+1), ESHdag)
-        call prealloc_mult(ESH(i,i+1), gns, work)
-        call prealloc_mult(work, ESHdag, Sigma_n(i,i))
-        call destroy(work, gns)
+        ! Y = Tr(i,i+1) gsmr(i+1);  Tr(i,i+1) = ESH(i,i+1)
+        call prealloc_mult(ESH(i,i+1), gsmr(i+1), Y)
 
-        !work2 = Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)
-        call zdagger(gsmr(i+1), gsmrDag)
-        call prealloc_mult(Sigma_n(i,i+1), gsmrDag, work)
-        call prealloc_mult(work, ESHdag, minusone, Sigma_n(i,i))
-        call destroy(work, gsmrDag, ESHdag)
+        ! Sigma(i,i) += Y Sigma(i+1,i+1) Y^dag  (= Tr gns(i+1) Ta)
+        call prealloc_mult(Y, Sigma_n(i+1,i+1), Z)
+        call zdagger(Y, Ydag)
+        call prealloc_mult(Z, Ydag, Sigma_n(i,i))
+        call destroy(Z, Ydag)
 
-        !work3 = ESH(i,i+1) gsmr(i+1) Sigma(i+1,i)
-        call prealloc_mult(ESH(i,i+1), gsmr(i+1), work)
-        call prealloc_mult(work, Sigma_n(i+1,i), minusone, Sigma_n(i,i))
-        call destroy(work)
-
-        if (i > 1) then
-          !gns(i) = gsmr(i) * Sigma_n(i,i) * gsmr^dag(i)
-          call zdagger(gsmr(i), gsmrDag)
-          call prealloc_mult(gsmr(i), Sigma_n(i,i), work)
-          call prealloc_mult(work, gsmrDag, gns)
-          call destroy(work, gsmrDag)
-        end if
-
+        ! Sigma(i,i) -= X + X^dag;  X^dag = Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)
+        call prealloc_mult(Y, Sigma_n(i+1,i), X)
+        call zdagger(X, Xdag)
+        Sigma_n(i,i)%val = Sigma_n(i,i)%val - X%val - Xdag%val
+        call destroy(Y, X, Xdag)
       end do
 
     end subroutine calculate_sigma_n
