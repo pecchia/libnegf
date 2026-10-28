@@ -59,8 +59,11 @@
         } \
     } while(false)
 #endif
-#define CUDA_CHECK(error) \
+// The argument is evaluated once: CUDA_CHECK(cudaGetLastError()) must not
+// call cudaGetLastError() again, which would return cudaSuccess
+#define CUDA_CHECK(expr) \
     do { \
+        cudaError_t error = (expr); \
         if(!(error == cudaSuccess)) { \
             std::fprintf( \
                 stderr, "CUDA error in %s line %u \n", __FILE__, \
@@ -390,6 +393,15 @@ extern "C" int cu_copyMatD2D(void* d_A, void* d_A_in, size_t bytecount) {
     ENFORCE(d_A);
     ENFORCE(d_A_in);
     cudaError_t err = cudaMemcpy(d_A, d_A_in, bytecount, cudaMemcpyDeviceToDevice);
+    CUDA_CHECK(err);
+    return err;
+}
+
+extern "C" int cu_clearMat(void* d_A, size_t bytecount) {
+    if(d_A == NULL) {
+        return 0;
+    }
+    cudaError_t err = cudaMemset(d_A, 0, bytecount);
     CUDA_CHECK(err);
     return err;
 }
