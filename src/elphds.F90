@@ -242,7 +242,7 @@ contains
       if (ierr.ne.0) then
          call error_msg('ALLOCATION ERROR: could not allocate block-Matrix')
       end if
-      call csr2blk3diag(this%sigma_r(ii), tmp_blk, this%struct%mat_PL_start)
+      call csr2blk3diag(this%sigma_n(ii), tmp_blk, this%struct%mat_PL_start)
       do jj = 1,npl
         sigma(jj, jj)%val = sigma(jj, jj)%val + tmp_blk(jj, jj)%val
         call destroy(tmp_blk(jj,jj))
