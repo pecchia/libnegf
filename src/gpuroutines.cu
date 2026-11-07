@@ -35,6 +35,12 @@
 #include <libnegf/cublas_v2.h>
 #include <libnegf/cusolverDn.h>
 
+// All device allocations go through the stream-ordered pool of the device
+// (default stream). Mixing cudaMalloc with cudaMallocAsync makes cudaMalloc
+// fail while freed memory is still reserved by the pool.
+#define LN_MALLOC(ptr, bytes) cudaMallocAsync((void**)(ptr), (bytes), 0)
+#define LN_FREE(ptr) cudaFreeAsync((ptr), 0)
+
 
 #if __CUDA_ARCH__
 #define ENFORCE(expr) \
@@ -336,7 +342,7 @@ __global__ void maxabs_kernel(const Number* __restrict__ data,
 
 extern "C" int cu_createMat(void** d_A, size_t bytecount) {
     ENFORCE(d_A);
-    cudaError_t err = cudaMalloc(d_A, bytecount);
+    cudaError_t err = LN_MALLOC(d_A, bytecount);
     CUDA_CHECK(err);
     return err;
 }
@@ -409,7 +415,7 @@ extern "C" int cu_clearMat(void* d_A, size_t bytecount) {
 extern "C" int cu_deleteMat(void** d_A) {
     int stat = 0;
     if(*d_A != NULL) {
-        stat = cudaFree(*d_A);
+        stat = LN_FREE(*d_A);
         *d_A = NULL;
     }
     return stat;
@@ -707,7 +713,7 @@ Real trace(
     // h_mask must point to logical(c_bool) data, i.e. 1 byte per element
     bool* d_mask = nullptr;
     if (mask_present) {
-       cudaStatus = cudaMalloc((void**)&d_mask, n64 * sizeof(bool));
+       cudaStatus = LN_MALLOC((void**)&d_mask, n64 * sizeof(bool));
        CUDA_CHECK(cudaStatus);
        cu_copyMatH2D(h_mask, d_mask, n64*sizeof(bool));
     }
@@ -717,11 +723,11 @@ Real trace(
     Real *d_real_diag;
     void *d_temp = nullptr;
     size_t temp_bytes = 0;
-    cudaStatus = cudaMalloc(&d_result, sizeof(Real));
+    cudaStatus = LN_MALLOC(&d_result, sizeof(Real));
     CUDA_CHECK(cudaStatus);
     cudaStatus = cudaMemset(static_cast<void*>(d_result), 0, sizeof(Real));
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaMalloc(&d_real_diag, n64*sizeof(Real));
+    cudaStatus = LN_MALLOC(&d_real_diag, n64*sizeof(Real));
     CUDA_CHECK(cudaStatus);
 
     getdiagKernel<<<num_blocks, BLOCK_SIZE>>>(d_A, nrow, d_real_diag, d_mask, mask_present);
@@ -730,7 +736,7 @@ Real trace(
     cudaStatus = cub::DeviceReduce::Sum(nullptr, temp_bytes, d_real_diag, d_result, nrow);
     CUDA_CHECK(cudaStatus);
 
-    cudaStatus = cudaMalloc(&d_temp, temp_bytes);
+    cudaStatus = LN_MALLOC(&d_temp, temp_bytes);
     CUDA_CHECK(cudaStatus);
 
     cudaStatus = cub::DeviceReduce::Sum(d_temp, temp_bytes, d_real_diag, d_result, nrow);
@@ -740,14 +746,14 @@ Real trace(
     CUDA_CHECK(cudaStatus);
 
     if (d_mask) {
-       cudaStatus = cudaFree(d_mask);
+       cudaStatus = LN_FREE(d_mask);
        CUDA_CHECK(cudaStatus);
     }
-    cudaStatus = cudaFree(d_result);
+    cudaStatus = LN_FREE(d_result);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_temp);
+    cudaStatus = LN_FREE(d_temp);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_real_diag);
+    cudaStatus = LN_FREE(d_real_diag);
     CUDA_CHECK(cudaStatus);
 
     return h_result;
@@ -848,21 +854,21 @@ int inverse(void* hpsolver, Number* d_A, Number* d_Ainv, int32_t n
 
     // prepare memory on the device
     Number* d_LU;
-    cudaStatus = cudaMalloc((void**)&d_LU, bytecount);
+    cudaStatus = LN_MALLOC((void**)&d_LU, bytecount);
     CUDA_CHECK(cudaStatus);
 
     int* d_pivot;
-    cudaStatus = cudaMalloc((void**)&d_pivot, n64 * sizeof(int));
+    cudaStatus = LN_MALLOC((void**)&d_pivot, n64 * sizeof(int));
     CUDA_CHECK(cudaStatus);
     int* d_info;
-    cudaStatus = cudaMalloc((void**)&d_info, sizeof(int));
+    cudaStatus = LN_MALLOC((void**)&d_info, sizeof(int));
     CUDA_CHECK(cudaStatus);
     // copy d_LU <- pdA
     cu_copyMatD2D(d_LU, d_A, bytecount);
 
     Number* d_work;
     size_t lwork_size = static_cast<size_t>(lwork) * sizeof(Number);
-    cudaStatus = cudaMalloc((void**)&d_work, lwork_size);
+    cudaStatus = LN_MALLOC((void**)&d_work, lwork_size);
     CUDA_CHECK(cudaStatus);
 
     // LU factorization of d_A , with partial pivoting and row
@@ -881,13 +887,13 @@ int inverse(void* hpsolver, Number* d_A, Number* d_Ainv, int32_t n
     ENFORCE(cusolverStatus == CUSOLVER_STATUS_SUCCESS);
     LIBNEGF_CHECK_INFO(d_info);
 
-    cudaStatus = cudaFree(d_pivot);
+    cudaStatus = LN_FREE(d_pivot);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_info);
+    cudaStatus = LN_FREE(d_info);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_work);
+    cudaStatus = LN_FREE(d_work);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_LU);
+    cudaStatus = LN_FREE(d_LU);
     CUDA_CHECK(cudaStatus);
 
     return cudaStatus;
@@ -940,15 +946,15 @@ int decimation(
     auto zero = Number{Real{0}};
 
     Number* d_Ao;
-    cudaStatus = cudaMalloc((void**)&d_Ao, bytecount);
+    cudaStatus = LN_MALLOC((void**)&d_Ao, bytecount);
     CUDA_CHECK(cudaStatus);
 
     Number* d_Bo;
-    cudaStatus = cudaMalloc((void**)&d_Bo, bytecount);
+    cudaStatus = LN_MALLOC((void**)&d_Bo, bytecount);
     CUDA_CHECK(cudaStatus);
 
     Number* d_Co;
-    cudaStatus = cudaMalloc((void**)&d_Co, bytecount);
+    cudaStatus = LN_MALLOC((void**)&d_Co, bytecount);
     CUDA_CHECK(cudaStatus);
 
     cu_copyMatH2D(h_Ao_in, d_Ao, bytecount);
@@ -956,28 +962,28 @@ int decimation(
     cu_copyMatH2D(h_Co_in, d_Co, bytecount);
 
     Number* d_Ao_s;
-    cudaStatus = cudaMalloc((void**)&d_Ao_s, bytecount);
+    cudaStatus = LN_MALLOC((void**)&d_Ao_s, bytecount);
     CUDA_CHECK(cudaStatus);
     Number* d_C1;
-    cudaStatus = cudaMalloc((void**)&d_C1, bytecount);
+    cudaStatus = LN_MALLOC((void**)&d_C1, bytecount);
     CUDA_CHECK(cudaStatus);
     Number* d_Go;
-    cudaStatus = cudaMalloc((void**)&d_Go, bytecount);
+    cudaStatus = LN_MALLOC((void**)&d_Go, bytecount);
     CUDA_CHECK(cudaStatus);
     int* d_pivot;
-    cudaStatus = cudaMalloc((void**)&d_pivot, n64 * sizeof(int));
+    cudaStatus = LN_MALLOC((void**)&d_pivot, n64 * sizeof(int));
     CUDA_CHECK(cudaStatus);
     Number* d_T;
-    cudaStatus = cudaMalloc((void**)&d_T, bytecount);
+    cudaStatus = LN_MALLOC((void**)&d_T, bytecount);
     CUDA_CHECK(cudaStatus);
     Number* d_Self;
-    cudaStatus = cudaMalloc((void**)&d_Self, bytecount);
+    cudaStatus = LN_MALLOC((void**)&d_Self, bytecount);
     CUDA_CHECK(cudaStatus);
     int* d_info;
-    cudaStatus = cudaMalloc((void**)&d_info, sizeof(int));
+    cudaStatus = LN_MALLOC((void**)&d_info, sizeof(int));
     CUDA_CHECK(cudaStatus);
     Real* d_norm;
-    cudaStatus = cudaMalloc((void**)&d_norm, sizeof(Real));
+    cudaStatus = LN_MALLOC((void**)&d_norm, sizeof(Real));
     CUDA_CHECK(cudaStatus);
 
     int lwork;
@@ -985,7 +991,7 @@ int decimation(
             libnegf::cusolverDngetrf_bufferSize(hcusolver, n, n, d_Self, n, &lwork);
     ENFORCE(cusolverStatus == CUSOLVER_STATUS_SUCCESS);
     Number* d_work;
-    cudaStatus = cudaMalloc((void**)&d_work, lwork * sizeof(Number));
+    cudaStatus = LN_MALLOC((void**)&d_work, lwork * sizeof(Number));
     CUDA_CHECK(cudaStatus);
 
     cu_copyMatD2D(d_Ao_s, d_Ao, bytecount);
@@ -1107,29 +1113,29 @@ int decimation(
     // copy to output to host
     cu_copyMatD2H(h_Go_out, d_Go, bytecount);
 
-    cudaStatus = cudaFree(d_pivot);
+    cudaStatus = LN_FREE(d_pivot);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_info);
+    cudaStatus = LN_FREE(d_info);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_Ao);
+    cudaStatus = LN_FREE(d_Ao);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_Bo);
+    cudaStatus = LN_FREE(d_Bo);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_Co);
+    cudaStatus = LN_FREE(d_Co);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_Go);
+    cudaStatus = LN_FREE(d_Go);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_Ao_s);
+    cudaStatus = LN_FREE(d_Ao_s);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_C1);
+    cudaStatus = LN_FREE(d_C1);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_T);
+    cudaStatus = LN_FREE(d_T);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_Self);
+    cudaStatus = LN_FREE(d_Self);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_work);
+    cudaStatus = LN_FREE(d_work);
     CUDA_CHECK(cudaStatus);
-    cudaStatus = cudaFree(d_norm);
+    cudaStatus = LN_FREE(d_norm);
     CUDA_CHECK(cudaStatus);
 
     return cudaStatus;
@@ -1160,11 +1166,35 @@ extern "C" int cu_Zdecimation(
 }
 
 
+static cudaMemPool_t default_mem_pool() {
+    int dev;
+    cudaMemPool_t pool;
+    CUDA_CHECK(cudaGetDevice(&dev));
+    CUDA_CHECK(cudaDeviceGetDefaultMemPool(&pool, dev));
+    return pool;
+}
+
+// Free memory as seen by libnegf: driver free memory plus memory reserved by
+// the stream-ordered pool but not in use (it is reused by LN_MALLOC).
 extern "C" int cu_meminfo(size_t* freemem, size_t* totalmem) {
-    //auto cudaStatus = cudaDeviceSynchronize();
-    //printf("STATUS: %d\n",cudaStatus);
-    //CUDA_CHECK(cudaStatus);
     auto cudaStatus = cudaMemGetInfo(freemem, totalmem);
+    CUDA_CHECK(cudaStatus);
+    cudaMemPool_t pool = default_mem_pool();
+    cuuint64_t reserved = 0, used = 0;
+    CUDA_CHECK(cudaMemPoolGetAttribute(pool, cudaMemPoolAttrReservedMemCurrent, &reserved));
+    CUDA_CHECK(cudaMemPoolGetAttribute(pool, cudaMemPoolAttrUsedMemCurrent, &used));
+    if (reserved > used) {
+        *freemem += static_cast<size_t>(reserved - used);
+    }
+    return cudaStatus;
+}
+
+// Release the unused memory of the pool to the driver, e.g. for libraries
+// (cuBLAS/cuSOLVER workspaces) that allocate with cudaMalloc.
+extern "C" int cu_trimMemPool() {
+    auto cudaStatus = cudaStreamSynchronize(0);
+    CUDA_CHECK(cudaStatus);
+    cudaStatus = cudaMemPoolTrimTo(default_mem_pool(), 0);
     CUDA_CHECK(cudaStatus);
     return cudaStatus;
 }

@@ -79,6 +79,7 @@ module cudautils
    public :: setDevice
    public :: getDeviceProperties
    public :: getDevMemInfo
+   public :: trimMemPool
 
 
    interface createGPU
@@ -370,6 +371,11 @@ module cudautils
        integer(c_int64_t) :: totalmem
      end function cu_meminfo
 
+     ! Release unused memory of the stream-ordered pool to the driver
+     integer(c_int) function cu_trimMemPool() bind(C, name='cu_trimMemPool')
+       use iso_c_binding
+     end function cu_trimMemPool
+
    #:for PREC in PRECISIONS
      #:set CTYPE = CHAR_ABBREVS['complex'][PREC]
      #:set C_BIND_CMPLX = ISO_C_BIND_TYPES['complex'][PREC]
@@ -522,6 +528,11 @@ end interface
      integer :: err
      err = cu_meminfo(freemem, totalmem)
    end subroutine getDevMemInfo
+
+   subroutine trimMemPool()
+     integer :: err
+     err = cu_trimMemPool()
+   end subroutine trimMemPool
 
    subroutine getDeviceProperties(dev)
      integer(4) :: dev

@@ -308,6 +308,8 @@ CONTAINS
     call delete_trid_fromGPU(ESH)
     negf%tKeepESHonGPU = .false.
     negf%tKeepGronGPU = .true.
+    ! Give the pool memory back to the driver (cuBLAS/cuSOLVER workspaces)
+    call trimMemPool()
 #:endif
 
     call destroy_gsm(gsmr)
