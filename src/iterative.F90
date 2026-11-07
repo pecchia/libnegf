@@ -259,7 +259,13 @@ CONTAINS
     !Computing device G_n
     call set_timer(negf, timers%Gn)
     call allocate_blk_dns(Gn,nbl)
+#:if defined("GPU")
+    ! GPU: Gn blocks are allocated (host only) inside calculate_Gn_tridiag_blocks
+    ! and returned on host. Gr, gsmr and Sigma_n device blocks are released
+    ! there as soon as consumed (Gr was copied to host above).
+#:else
     call init_tridiag_blk(Gn,ESH)
+#:endif
 
     call calculate_Gn_tridiag_blocks(negf,ESH,SelfEneR,frm,ref,negf%str,gsmr,Gr,Gn)
 
@@ -271,10 +277,6 @@ CONTAINS
 
     call destroy_gsm(gsmr)
     call deallocate_gsm(gsmr)
-
-#:if defined("GPU")
-      call copy_trid_toHOST(Gn)
-#:endif
 
     !Passing G^n to interactions
     call set_Gn_ela(negf, Gn)
@@ -1061,8 +1063,8 @@ CONTAINS
 #:if defined("GPU")
   !**********************************************************************
   ! Decide whether the off-diagonal ESH blocks can stay on GPU during
-  ! gsmr, Gr and Gn. The working set (gsmr, Gr, Gn, Sigma_n and work
-  ! blocks) is bounded by 5 block-tridiagonal matrices.
+  ! gsmr, Gr and Gn. The working set (gsmr, Gr, diag+lower Sigma_n and a
+  ! few Gn/work blocks) is bounded by 3 block-tridiagonal matrices.
   !**********************************************************************
   function fits_ESH_on_GPU(ESH) result(fits)
     type(z_DNS), dimension(:,:), intent(in) :: ESH
@@ -1086,7 +1088,7 @@ CONTAINS
     trid = trid + offdiag
 
     call getDevMemInfo(freemem, totalmem)
-    fits = (real(elemBytes*(offdiag + 5*trid),dp) < memFraction*real(freemem,dp))
+    fits = (real(elemBytes*(offdiag + 3*trid),dp) < memFraction*real(freemem,dp))
 
   end function fits_ESH_on_GPU
 #:endif

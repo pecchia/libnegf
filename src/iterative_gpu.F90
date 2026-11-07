@@ -424,9 +424,20 @@ contains
 
     use iso_c_binding, only : c_associated
 
+    ! Memory handling (GPU):
+    !  - On entry Gr must be on GPU *and* already copied to host.
+    !    Gr blocks are released from the GPU as soon as they are consumed.
+    !  - gsmr(i+1) and Sigma_n blocks are released from the GPU once consumed.
+    !  - Gn blocks are allocated here on the host only (Gn must not be allocated
+    !    on entry). Each block lives on the GPU only while needed, is copied
+    !    to host and released. Gn(i,i+1) is never on the GPU: it is obtained
+    !    on host as Gn(i+1,i)^dag.
+    !  - Sigma_n(i,i+1) is never uploaded (only Sigma_n(i+1,i) is used).
+    !  On exit Gn is on host only; Gr, gsmr, Sigma_n are not on the GPU.
     type(TNegf), intent(in) :: negf
     type(${MTYPE}$), dimension(:,:), intent(inout) :: ESH, Gr
-    type(${MTYPE}$), dimension(:), intent(in) :: SelfEneR, gsmr
+    type(${MTYPE}$), dimension(:), intent(in) :: SelfEneR
+    type(${MTYPE}$), dimension(:), intent(inout) :: gsmr
     real(${KIND}$), dimension(:), intent(in) :: frm
     integer, intent(in) :: ref
     type(Tstruct_info), intent(in) :: struct
@@ -446,6 +457,10 @@ contains
     ncont = struct%num_conts
     nbl = struct%num_PLs
     hh = negf%hcublas
+
+    ! Gn: host-only allocation; device copies are created block by block
+    call init_tridiag_blk(Gn, ESH)
+
     !build Sigma_n from SelfEneR
     call allocate_blk_dns(Sigma_n, nbl)
     call init_tridiag_blk(Sigma_n, ESH)
@@ -464,16 +479,30 @@ contains
       endif
     end do
 
-    call copy_trid_toGPU(Sigma_n)
+    ! Upload diagonal and lower blocks only: Sigma_n(i,i+1) = Sigma_n(i+1,i)^dag
+    ! is never used on the device
+    call createGPU_async(Sigma_n(1,1))
+    call copyToGPU_async(Sigma_n(1,1))
+    do i = 2, nbl
+      call createGPU_async(Sigma_n(i,i))
+      call copyToGPU_async(Sigma_n(i,i))
+      call createGPU_async(Sigma_n(i,i-1))
+      call copyToGPU_async(Sigma_n(i,i-1))
+    end do
 
     call calculate_sigma_n()
     ! Gr * Sigma_n * Gr^+
-    call createAll(work1,Sigma_n(1,1)%nrow, Gr(1,1)%nrow)
+    call createGPU_only_async(work1, Sigma_n(1,1)%nrow, Gr(1,1)%nrow)
     call matmul_gpu(hh, one, Sigma_n(1,1), Gr(1,1), zero, work1, 'dag_2nd')
+    call deleteGPU_async(Sigma_n(1,1))
+    call createGPU_async(Gn(1,1))
     call matmul_gpu(hh, one, Gr(1,1), work1, zero, Gn(1,1))
-    call destroyAll(work1)
+    call deleteGPU_async(work1)
 
     if (nbl .eq. 1) then
+      call deleteGPU_async(Gr(1,1))
+      call copyFromGPU(Gn(1,1))
+      call deleteGPU_async(Gn(1,1))
       call destroy_tridiag_blk(Sigma_n)
       call deallocate_blk_dns(Sigma_n)
       return
@@ -486,6 +515,9 @@ contains
     !Gn(i,i+1) = Gn(i+1,i)^dag
     !Gn(i+1,i+1) = gsmr(i+1) * [Sigma(i+1,i)Ga(i,i+1) + Sigma(i+1,i+1)Ga(i+1,i+1) - Tr(i+1,i)Gn(i,i+1)]
     !Implementation exploits cumulative sum of prealloc_mult, C = C + A*B
+    !
+    !Device residency at step i (entry): Gn(i,i), Gr(i..nbl), Sigma_n(i+1..nbl),
+    !gsmr(i+1..nbl). Everything with index <= i is released during step i.
 
     do i = 1, nbl-1
 
@@ -496,30 +528,49 @@ contains
           call copyToGPU_async(ESH(i+1,i))
         end if
 
-        call createAll(work1, Sigma_n(i+1,i)%nrow, Gr(i,i)%nrow)
+        ! work1 = Sigma(i+1,i)Ga(i,i) + Sigma(i+1,i+1)Ga(i+1,i) - Tr(i+1,i)Gn(i,i)
+        call createGPU_only_async(work1, Sigma_n(i+1,i)%nrow, Gr(i,i)%nrow)
         call matmul_gpu(hh, one, Sigma_n(i+1,i), Gr(i,i), zero, work1, 'dag_2nd')
+        call deleteGPU_async(Gr(i,i))
         call matmul_gpu(hh, one, Sigma_n(i+1,i+1), Gr(i,i+1), one, work1, 'dag_2nd')
-
+        call deleteGPU_async(Gr(i,i+1))
         call matmul_gpu(hh, minusOne, ESH(i+1,i), Gn(i,i), one, work1)
 
+        ! Gn(i,i) is final: move to host
+        call copyFromGPU(Gn(i,i))
+        call deleteGPU_async(Gn(i,i))
+
+        call createGPU_async(Gn(i+1,i))
         call matmul_gpu(hh, one, gsmr(i+1), work1, zero, Gn(i+1,i))
-        call destroyAll(work1)
+        call deleteGPU_async(work1)
 
-        call dagger_gpu(hh, Gn(i+1,i),Gn(i,i+1))
-
-        call createAll(work1, Sigma_n(i+1,i)%nrow, Gr(i+1,i)%nrow)
-        call matmul_gpu(hh, one,Sigma_n(i+1,i), Gr(i+1,i), zero, work1, 'dag_2nd')
-
-        call matmul_gpu(hh, one,Sigma_n(i+1,i+1), Gr(i+1,i+1), one, work1, 'dag_2nd')
-
-        call matmul_gpu(hh, minusOne, ESH(i+1,i), Gn(i,i+1), one, work1)
+        ! work1 = Sigma(i+1,i)Ga(i,i+1) + Sigma(i+1,i+1)Ga(i+1,i+1) - Tr(i+1,i)Gn(i,i+1)
+        ! with Gn(i,i+1) = Gn(i+1,i)^dag
+        call createGPU_only_async(work1, Sigma_n(i+1,i)%nrow, Gr(i+1,i)%nrow)
+        call matmul_gpu(hh, one, Sigma_n(i+1,i), Gr(i+1,i), zero, work1, 'dag_2nd')
+        call deleteGPU_async(Sigma_n(i+1,i))
+        call deleteGPU_async(Gr(i+1,i))
+        call matmul_gpu(hh, one, Sigma_n(i+1,i+1), Gr(i+1,i+1), one, work1, 'dag_2nd')
+        call deleteGPU_async(Sigma_n(i+1,i+1))
+        call matmul_gpu(hh, minusOne, ESH(i+1,i), Gn(i+1,i), one, work1, 'dag_2nd')
 
         if (.not. negf%tKeepESHonGPU) call deleteGPU_async(ESH(i+1,i))
 
-        call matmul_gpu(hh, one,gsmr(i+1), work1, zero, Gn(i+1,i+1))
-        call destroyAll(work1)
+        ! Gn(i+1,i) is final: move to host, Gn(i,i+1) from hermiticity
+        call copyFromGPU(Gn(i+1,i))
+        call deleteGPU_async(Gn(i+1,i))
+        Gn(i,i+1)%val = conjg(transpose(Gn(i+1,i)%val))
+
+        call createGPU_async(Gn(i+1,i+1))
+        call matmul_gpu(hh, one, gsmr(i+1), work1, zero, Gn(i+1,i+1))
+        call deleteGPU_async(work1)
+        call deleteGPU_async(gsmr(i+1))
 
     end do
+
+    call deleteGPU_async(Gr(nbl,nbl))
+    call copyFromGPU(Gn(nbl,nbl))
+    call deleteGPU_async(Gn(nbl,nbl))
 
     call destroy_tridiag_blk(Sigma_n, "Sigma_n")
     call deallocate_blk_dns(Sigma_n)
