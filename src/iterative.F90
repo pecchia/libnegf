@@ -201,6 +201,28 @@ CONTAINS
     !
     !Optional: Grout (used with Gn to calculate Gp)
     !   outblokcs -> same options as above
+    !
+    ! Logic:
+    ! Fold Sigma_n into the gsmr upward pass; separate Gr/Gn downward passes
+    ! Upward pass: Sigma_n is now built on host before gsmr (new build_sigma_n:
+    ! interaction + contact terms) and folded inside calculate_gsmr_blocks via
+    ! the optional sigma_n argument, reusing the Tr(i,i+1) gsmr(i+1) product
+    ! gsmr already computes. This saves one GEMM per PL and the second upload of
+    ! ESH(i,i+1) on GPU. calculate_Gn_tridiag_blocks now only does the downward
+    ! pass on the folded Sigma_n (args: ESH, Sigma_n, gsmr, Gr, Gn);
+    ! the duplicated add_sigma_n and calculate_sigma_n are removed from
+    ! iterative_cpu/gpu.
+    ! GPU residency: new flag tKeepGronGPU, set together with tKeepESHonGPU by
+    ! set_GPU_residency (replaces fits_ESH_on_GPU; ESH has priority, as it saves
+    ! more transfers per byte). If Gr does not fit, its blocks are moved to host
+    ! during the Gr sweep and re-uploaded on demand by Gn. New helper
+    ! uploadToGPU_if_absent uploads a block only when it has no device copy.
+    ! Sigma_n is allocated host-only on purpose: in GPU builds
+    ! block_3_diag::init_tridiag_blk uses createAll, whose allocated but unfilled
+    ! device copy would be skipped by uploadToGPU_if_absent.
+    ! Tests: transport suite passes on CPU and on GPU (A100); SCBA histories of
+    ! inelastic_H56/H-sheet identical to the previous revision.
+    ! (Co-Authored-By: Claude Opus 5.5)
     !*****************************************************************************
 
     implicit none
@@ -214,6 +236,7 @@ CONTAINS
     type(z_CSR), intent(inout), optional  :: Gnout, Grout
 
     !Work
+    type(z_DNS), dimension(:,:), allocatable :: Sigma_n
     integer :: ref
     complex(dp) :: Ec
     integer :: ncont,nbl
@@ -233,14 +256,17 @@ CONTAINS
 
     ! Add interaction self energies (if any)
     call add_sigma_r(negf, ESH)
+
+    ! Bare Sigma_n (interactions + contacts); folded upward during gsmr
+    call build_sigma_n(negf, ESH, SelfEneR, frm, ref, Sigma_n)
     call stop_timer(negf, timers%BuildESH)
 
 #:if defined("GPU")
-    negf%tKeepESHonGPU = fits_ESH_on_GPU(ESH)
+    call set_GPU_residency(negf, ESH)
 #:endif
 
     call allocate_gsm(gsmr,nbl)
-    call calculate_gsmr_blocks(negf,ESH,nbl,2,gsmr)
+    call calculate_gsmr_blocks(negf,ESH,nbl,2,gsmr,sigma_n=Sigma_n)
 
     call allocate_blk_dns(Gr,nbl)
     ! compute Gr(1,1)
@@ -249,7 +275,12 @@ CONTAINS
     call calculate_Gr_tridiag_blocks(negf,ESH,gsmr,Gr,2,nbl)
 
 #:if defined("GPU")
+    if (negf%tKeepGronGPU) then
       call copy_trid_toHOST(Gr)
+    else
+      ! all other blocks were moved to host during the Gr sweep
+      call copyFromGPU(Gr(nbl,nbl))
+    end if
 #:endif
 
     !Passing Gr to interactions
@@ -262,17 +293,21 @@ CONTAINS
 #:if defined("GPU")
     ! GPU: Gn blocks are allocated (host only) inside calculate_Gn_tridiag_blocks
     ! and returned on host. Gr, gsmr and Sigma_n device blocks are released
-    ! there as soon as consumed (Gr was copied to host above).
+    ! there as soon as consumed (Gr is on host already).
 #:else
     call init_tridiag_blk(Gn,ESH)
 #:endif
 
-    call calculate_Gn_tridiag_blocks(negf,ESH,SelfEneR,frm,ref,negf%str,gsmr,Gr,Gn)
+    call calculate_Gn_tridiag_blocks(negf,ESH,Sigma_n,gsmr,Gr,Gn)
+
+    call destroy_tridiag_blk(Sigma_n)
+    call deallocate_blk_dns(Sigma_n)
 
 #:if defined("GPU")
     ! Release ESH blocks kept on GPU by gsmr/Gr/Gn
     call delete_trid_fromGPU(ESH)
     negf%tKeepESHonGPU = .false.
+    negf%tKeepGronGPU = .true.
 #:endif
 
     call destroy_gsm(gsmr)
@@ -559,6 +594,58 @@ CONTAINS
       it => it%next
     end do
   end subroutine add_sigma_n
+
+  !--------------------------------------------------------------------------
+  ! Build the (bare) block-tridiagonal Sigma_n on host:
+  !   Sigma_n = Sigma_n(interactions) + Sum_{j/=ref} [f_j - f_ref] Gamma_j
+  ! Sigma_n is allocated here; it is folded upward by
+  ! calculate_gsmr_blocks(..., sigma_n=Sigma_n).
+  subroutine build_sigma_n(negf, ESH, SelfEneR, frm, ref, Sigma_n)
+    class(TNegf) :: negf
+    type(z_DNS), dimension(:,:), intent(in) :: ESH
+    type(z_DNS), dimension(:), intent(in) :: SelfEneR
+    real(dp), dimension(:), intent(in) :: frm
+    integer, intent(in) :: ref
+    type(z_DNS), dimension(:,:), allocatable, intent(inout) :: Sigma_n
+
+    type(z_DNS) :: Gam
+    complex(dp) :: frmdiff
+    integer :: j, cb, nbl
+
+    nbl = negf%str%num_PLs
+    call allocate_blk_dns(Sigma_n, nbl)
+    ! Host-only allocation: block_3_diag::init_tridiag_blk would also allocate
+    ! (unfilled) device copies, which uploadToGPU_if_absent would then never upload
+    call create_zero(Sigma_n(1,1), ESH(1,1))
+    do j = 2, nbl
+      call create_zero(Sigma_n(j-1,j), ESH(j-1,j))
+      call create_zero(Sigma_n(j,j), ESH(j,j))
+      call create_zero(Sigma_n(j,j-1), ESH(j,j-1))
+    end do
+
+    call add_sigma_n(negf, Sigma_n)
+
+    do j = 1, negf%str%num_conts
+      frmdiff = frm(j) - frm(ref)
+      if (j.ne.ref .and. abs(frmdiff).gt.EPS10) then
+        cb = negf%str%cblk(j) ! block corresponding to contact j
+        call zspectral(SelfEneR(j), Gam)
+        Sigma_n(cb,cb)%val = Sigma_n(cb,cb)%val + frmdiff*Gam%val
+        call destroy(Gam)
+      end if
+    end do
+
+  contains
+
+    subroutine create_zero(A, S)
+      type(z_DNS), intent(inout) :: A
+      type(z_DNS), intent(in) :: S
+
+      call create(A, S%nrow, S%ncol)
+      A%val = (0.0_dp, 0.0_dp)
+    end subroutine create_zero
+
+  end subroutine build_sigma_n
 
 
   !--------------------------------------------------------------------------
@@ -1062,35 +1149,43 @@ CONTAINS
 
 #:if defined("GPU")
   !**********************************************************************
-  ! Decide whether the off-diagonal ESH blocks can stay on GPU during
-  ! gsmr, Gr and Gn. The working set (gsmr, Gr, diag+lower Sigma_n and a
-  ! few Gn/work blocks) is bounded by 3 block-tridiagonal matrices.
+  ! Decide which blocks can stay on GPU across gsmr, Gr and Gn.
+  ! With D = diagonal and O = off-diagonal (both sides) sizes:
+  !   always resident: gsmr (D) + folded Sigma_n diag+lower (D + O/2)
+  !   tKeepESHonGPU:   off-diagonal ESH (O); saves 3 uploads of O/2
+  !   tKeepGronGPU:    Gr (D + O); saves one upload of D + O
+  ! ESH has the larger saving per byte, so it is granted first.
   !**********************************************************************
-  function fits_ESH_on_GPU(ESH) result(fits)
+  subroutine set_GPU_residency(negf, ESH)
+    type(Tnegf), intent(inout) :: negf
     type(z_DNS), dimension(:,:), intent(in) :: ESH
-    logical :: fits
 
     real(dp), parameter :: memFraction = 0.8_dp
     integer(8), parameter :: elemBytes = 16
-    integer(8) :: freemem, totalmem, offdiag, trid
+    integer(8) :: freemem, totalmem, offdiag, diag, need
+    real(dp) :: avail
     integer :: i, nbl
 
     nbl = size(ESH,1)
-    trid = 0
+    diag = 0
     offdiag = 0
     do i = 1, nbl
-      trid = trid + int(ESH(i,i)%nrow,8)*int(ESH(i,i)%ncol,8)
+      diag = diag + int(ESH(i,i)%nrow,8)*int(ESH(i,i)%ncol,8)
     end do
     do i = 2, nbl
       offdiag = offdiag + int(ESH(i-1,i)%nrow,8)*int(ESH(i-1,i)%ncol,8) &
           & + int(ESH(i,i-1)%nrow,8)*int(ESH(i,i-1)%ncol,8)
     end do
-    trid = trid + offdiag
 
     call getDevMemInfo(freemem, totalmem)
-    fits = (real(elemBytes*(offdiag + 3*trid),dp) < memFraction*real(freemem,dp))
+    avail = memFraction*real(freemem,dp)
 
-  end function fits_ESH_on_GPU
+    need = 2*diag + offdiag/2
+    negf%tKeepESHonGPU = (real(elemBytes*(need + offdiag),dp) < avail)
+    if (negf%tKeepESHonGPU) need = need + offdiag
+    negf%tKeepGronGPU = (real(elemBytes*(need + diag + offdiag),dp) < avail)
+
+  end subroutine set_GPU_residency
 #:endif
 
 

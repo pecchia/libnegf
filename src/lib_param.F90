@@ -125,6 +125,9 @@ module lib_param
    integer(C_SIZE_T) :: totalmem  ! Total memory on GPU
    ! Keep off-diagonal ESH blocks on GPU across gsmr, Gr and Gn (set per energy point)
    logical :: tKeepESHonGPU = .false.
+   ! Keep Gr blocks on GPU after the Gr sweep (otherwise they are moved to host
+   ! as soon as final and re-uploaded on demand by Gn)
+   logical :: tKeepGronGPU = .true.
 #:endif
     integer  :: ReadoldDM_SGFs    ! 0: Read 1: compute 2: comp & save
     integer  :: ReadoldT_SGFs     ! 0: Read 1: compute 2: comp & save

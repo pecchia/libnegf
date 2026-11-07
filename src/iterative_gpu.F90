@@ -105,12 +105,12 @@ module iterative_gpu
    #:endfor
   end interface check_convergence_vec
 
-  interface add_sigma_n
+  interface uploadToGPU_if_absent
    #:for PREC in PRECISIONS
      #:set KIND = PREC_ABBREVS[PREC]
-     module procedure add_sigma_n_${KIND}$
+     module procedure uploadToGPU_if_absent_${KIND}$
    #:endfor
-  end interface add_sigma_n
+  end interface uploadToGPU_if_absent
 
   interface init_tridiag_blk
    #:for PREC in PRECISIONS
@@ -144,9 +144,16 @@ contains
 
 
 #:def calculate_gsmr_blocks_template(KIND, CTYPE, MTYPE, CUDATYPE)
-  subroutine calculate_gsmr_blocks_${KIND}$(negf,ESH,sbl,ebl,gsmr,keep_gsmr)
+  subroutine calculate_gsmr_blocks_${KIND}$(negf,ESH,sbl,ebl,gsmr,keep_gsmr,sigma_n)
 
     use iso_c_binding, only : c_associated, C_NULL_PTR
+
+    ! Optional sigma_n (in/out): on entry the bare Sigma_n on host (diag +
+    ! lower blocks used). Blocks are uploaded here and the diagonal ones are
+    ! folded upward on the device (see fold_sigma_n). On exit the folded
+    ! Sigma_n(i,i) and Sigma_n(i+1,i) live on the GPU (host diagonal copies
+    ! are stale), ready for calculate_Gn_tridiag_blocks.
+    ! Requires sbl = nbl and keep_gsmr = .true.
 
     !In/Out
     type(${MTYPE}$), dimension(:), intent(inout) :: gsmr
@@ -154,6 +161,7 @@ contains
     type(${MTYPE}$), dimension(:,:), intent(inout) :: ESH
     integer, intent(in) :: sbl,ebl                 ! start block, end block
     logical, intent(in), optional :: keep_gsmr
+    type(${MTYPE}$), dimension(:,:), intent(inout), optional :: sigma_n
 
     !Work
     type(CublasHandle) :: hh
@@ -176,10 +184,18 @@ contains
        keep = keep_gsmr
     end if
 
+    if (present(sigma_n)) then
+       if (.not.keep .or. sbl.ne.nbl) then
+          call error_msg("Error: gsmr with sigma_n requires sbl=nbl and keep_gsmr")
+       end if
+    end if
+
     nrow=ESH(sbl,sbl)%nrow
 
     hh = negf%hcublas
     hhsol = negf%hcusolver
+
+    if (present(sigma_n)) call uploadToGPU_if_absent(sigma_n(sbl,sbl))
 
     call create(gsmr(sbl),nrow,nrow)
     call createGPU_async(gsmr(sbl))
@@ -190,10 +206,12 @@ contains
 
     do i=sbl-1,ebl,-1
 
+       ! work1 = Tr(i,i+1) gsmr(i+1)
        call createGPU_only_async(work1, ESH(i,i+1)%nrow, gsmr(i+1)%ncol)
-       call createGPU_async(ESH(i,i+1))
-       call copyToGPU_async(ESH(i,i+1))
+       call uploadToGPU_if_absent(ESH(i,i+1))
        call matmul_gpu(hh, one, ESH(i,i+1), gsmr(i+1), zero, work1)
+
+       if (present(sigma_n)) call fold_sigma_n(work1, i)
 
        if (.not.keep) then
           call destroyAll(gsmr(i+1))
@@ -205,8 +223,7 @@ contains
        call copyToGPU_async(ESH(i,i))
        ESH(i,i)%d_addr = C_NULL_PTR
 
-       call createGPU_async(ESH(i+1,i))
-       call copyToGPU_async(ESH(i+1,i))
+       call uploadToGPU_if_absent(ESH(i+1,i))
        call matmul_gpu(hh, mone, work1, ESH(i+1,i), one, work2)
 
        call deleteGPU_async(work1)
@@ -216,6 +233,50 @@ contains
        call inverse_gpu(hh, hhsol, work2, gsmr(i), istat)
        call deleteGPU_async(work2)
     end do
+
+    ! gsmr(ebl-1) is not needed, but Sigma_n must be folded down to ebl-1
+    ! (ESH(ebl-1,ebl) is left on the GPU, as calculate_Gr_tridiag_blocks does)
+    if (present(sigma_n) .and. ebl.gt.1) then
+       i = ebl-1
+       call createGPU_only_async(work1, ESH(i,i+1)%nrow, gsmr(i+1)%ncol)
+       call uploadToGPU_if_absent(ESH(i,i+1))
+       call matmul_gpu(hh, one, ESH(i,i+1), gsmr(i+1), zero, work1)
+       call fold_sigma_n(work1, i)
+       call deleteGPU_async(work1)
+    end if
+
+  contains
+
+    ! Upward recursion of Sigma_n, given Y = Tr(i,i+1) gsmr(i+1) on device:
+    ! Sigma(i,i) = Sigma(i,i) + Tr(i,i+1) gns(i+1) Ta(i+1,i)
+    !                         - Tr(i,i+1) gsmr(i+1) Sigma(i+1,i)
+    !                         - Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)
+    ! with gns(i+1) = gsmr(i+1) Sigma(i+1,i+1) gsmr(i+1)^dag and
+    ! Sigma(i,i+1) = Sigma(i+1,i)^dag:
+    ! Sigma(i,i) = Sigma(i,i) + Y Sigma(i+1,i+1) Y^dag - X - X^dag,  X = Y Sigma(i+1,i)
+    ! 3 matrix products per block (Y is shared with gsmr; gns is never formed).
+    ! Sigma_n(i,i+1) is never uploaded.
+    subroutine fold_sigma_n(Y, i)
+      type(${MTYPE}$), intent(in) :: Y
+      integer, intent(in) :: i
+
+      type(${MTYPE}$) :: Z, X
+
+      call uploadToGPU_if_absent(sigma_n(i,i))
+      call uploadToGPU_if_absent(sigma_n(i+1,i))
+
+      call createGPU_only_async(Z, Y%nrow, sigma_n(i+1,i+1)%ncol)
+      call matmul_gpu(hh, one, Y, sigma_n(i+1,i+1), zero, Z)
+      call matmul_gpu(hh, one, Z, Y, one, sigma_n(i,i), 'dag_2nd')
+      call deleteGPU_async(Z)
+
+      call createGPU_only_async(X, Y%nrow, sigma_n(i+1,i)%ncol)
+      call matmul_gpu(hh, one, Y, sigma_n(i+1,i), zero, X)
+      call matsum_gpu(hh, one, sigma_n(i,i), mone, X, sigma_n(i,i))
+      call matsum_gpu(hh, one, sigma_n(i,i), mone, X, sigma_n(i,i), 'dag_2nd')
+      call deleteGPU_async(X)
+
+    end subroutine fold_sigma_n
 
   end subroutine calculate_gsmr_blocks_${KIND}$
 #:enddef calculate_gsmr_blocks_template
@@ -331,6 +392,17 @@ contains
           call matsum_gpu(hh, one, gsmr(i), one, work1, Gr(i,i))
 
           call deleteGPU_async(work1)
+
+          ! Gr(i-1,i-1), Gr(i,i-1), Gr(i-1,i) are final: move to host
+          ! unless Gr is kept on the GPU (Gr(ebl,ebl) always stays)
+          if (.not. negf%tKeepGronGPU) then
+            call copyFromGPU(Gr(i-1,i-1))
+            call deleteGPU_async(Gr(i-1,i-1))
+            call copyFromGPU(Gr(i,i-1))
+            call deleteGPU_async(Gr(i,i-1))
+            call copyFromGPU(Gr(i-1,i))
+            call deleteGPU_async(Gr(i-1,i))
+          end if
        end do
     else
        call error_msg( "Error: Gr_tridiag requires gsml")
@@ -420,27 +492,30 @@ contains
 
   ! ---------------------------------------------------------------------------------
 #:def calculate_Gn_tridiag_blocks_template(KIND, CTYPE, MTYPE, CUDATYPE)
-  subroutine calculate_Gn_tridiag_blocks_${KIND}$(negf,ESH,SelfEneR,frm,ref,struct,gsmr,Gr,Gn)
+  subroutine calculate_Gn_tridiag_blocks_${KIND}$(negf,ESH,Sigma_n,gsmr,Gr,Gn)
 
     use iso_c_binding, only : c_associated
 
+    ! Downward pass only: Sigma_n must be built (build_sigma_n) and folded
+    ! upward by calculate_gsmr_blocks(..., sigma_n=Sigma_n) beforehand.
+    !
     ! Memory handling (GPU):
-    !  - On entry Gr must be on GPU *and* already copied to host.
+    !  - On entry Gr must be on host. Gr blocks still on the GPU are used
+    !    directly (negf%tKeepGronGPU), missing ones are uploaded on demand.
     !    Gr blocks are released from the GPU as soon as they are consumed.
-    !  - gsmr(i+1) and Sigma_n blocks are released from the GPU once consumed.
+    !  - Sigma_n: folded diag and lower blocks are expected on the GPU (left
+    !    there by gsmr). They are released once consumed. Sigma_n(i,i+1) is
+    !    never used.
+    !  - gsmr(i+1) is released from the GPU once consumed.
     !  - Gn blocks are allocated here on the host only (Gn must not be allocated
     !    on entry). Each block lives on the GPU only while needed, is copied
     !    to host and released. Gn(i,i+1) is never on the GPU: it is obtained
     !    on host as Gn(i+1,i)^dag.
-    !  - Sigma_n(i,i+1) is never uploaded (only Sigma_n(i+1,i) is used).
     !  On exit Gn is on host only; Gr, gsmr, Sigma_n are not on the GPU.
     type(TNegf), intent(in) :: negf
     type(${MTYPE}$), dimension(:,:), intent(inout) :: ESH, Gr
-    type(${MTYPE}$), dimension(:), intent(in) :: SelfEneR
+    type(${MTYPE}$), dimension(:,:), intent(inout) :: Sigma_n
     type(${MTYPE}$), dimension(:), intent(inout) :: gsmr
-    real(${KIND}$), dimension(:), intent(in) :: frm
-    integer, intent(in) :: ref
-    type(Tstruct_info), intent(in) :: struct
     type(${MTYPE}$), dimension(:,:), intent(inout) :: Gn
 
     !Work
@@ -448,50 +523,18 @@ contains
     complex(${KIND}$) :: one = cmplx(1.0, 0.0, ${KIND}$)
     complex(${KIND}$) :: minusone = cmplx(-1.0, 0.0, ${KIND}$)
     complex(${KIND}$) :: zero = cmplx(0.0, 0.0, ${KIND}$)
-    type(${MTYPE}$), dimension(:,:), allocatable :: Sigma_n
-    type(${MTYPE}$) :: work1, Gam
-    complex(${KIND}$) :: frmdiff
-    integer :: i, j
-    integer :: nbl, ncont, cb
+    type(${MTYPE}$) :: work1
+    integer :: i, nbl
 
-    ncont = struct%num_conts
-    nbl = struct%num_PLs
+    nbl = size(ESH,1)
     hh = negf%hcublas
 
     ! Gn: host-only allocation; device copies are created block by block
     call init_tridiag_blk(Gn, ESH)
 
-    !build Sigma_n from SelfEneR
-    call allocate_blk_dns(Sigma_n, nbl)
-    call init_tridiag_blk(Sigma_n, ESH)
-
-    ! Add interaction self-energies
-    call add_sigma_n(negf, Sigma_n)
-
-    ! Add contact self-energies
-    do j=1,ncont
-      frmdiff = cmplx(frm(j) - frm(ref), 0.0, ${KIND}$)
-      if (j.ne.ref .and. abs(frmdiff).gt.EPS10) then
-        cb=struct%cblk(j) ! block corresponding to contact j
-        call zspectral(SelfEneR(j),Gam)
-        Sigma_n(cb,cb)%val = Sigma_n(cb,cb)%val + frmdiff * Gam%val
-        call destroy(Gam)
-      endif
-    end do
-
-    ! Upload diagonal and lower blocks only: Sigma_n(i,i+1) = Sigma_n(i+1,i)^dag
-    ! is never used on the device
-    call createGPU_async(Sigma_n(1,1))
-    call copyToGPU_async(Sigma_n(1,1))
-    do i = 2, nbl
-      call createGPU_async(Sigma_n(i,i))
-      call copyToGPU_async(Sigma_n(i,i))
-      call createGPU_async(Sigma_n(i,i-1))
-      call copyToGPU_async(Sigma_n(i,i-1))
-    end do
-
-    call calculate_sigma_n()
     ! Gr * Sigma_n * Gr^+
+    call uploadToGPU_if_absent(Sigma_n(1,1))
+    call uploadToGPU_if_absent(Gr(1,1))
     call createGPU_only_async(work1, Sigma_n(1,1)%nrow, Gr(1,1)%nrow)
     call matmul_gpu(hh, one, Sigma_n(1,1), Gr(1,1), zero, work1, 'dag_2nd')
     call deleteGPU_async(Sigma_n(1,1))
@@ -503,8 +546,6 @@ contains
       call deleteGPU_async(Gr(1,1))
       call copyFromGPU(Gn(1,1))
       call deleteGPU_async(Gn(1,1))
-      call destroy_tridiag_blk(Sigma_n)
-      call deallocate_blk_dns(Sigma_n)
       return
     endif
 
@@ -516,22 +557,24 @@ contains
     !Gn(i+1,i+1) = gsmr(i+1) * [Sigma(i+1,i)Ga(i,i+1) + Sigma(i+1,i+1)Ga(i+1,i+1) - Tr(i+1,i)Gn(i,i+1)]
     !Implementation exploits cumulative sum of prealloc_mult, C = C + A*B
     !
-    !Device residency at step i (entry): Gn(i,i), Gr(i..nbl), Sigma_n(i+1..nbl),
-    !gsmr(i+1..nbl). Everything with index <= i is released during step i.
+    !Device residency at step i (entry): Gn(i,i), Gr(i,i), Sigma_n(i+1..nbl),
+    !gsmr(i+1..nbl) [+ Gr(i..nbl) if kept]. Everything with index <= i is
+    !released during step i.
 
     do i = 1, nbl-1
 
         ! ESH(i+1,i) is copied once and used twice in this iteration
         ! (already on GPU if negf%tKeepESHonGPU)
-        if (.not. c_associated(ESH(i+1,i)%d_addr)) then
-          call createGPU_async(ESH(i+1,i))
-          call copyToGPU_async(ESH(i+1,i))
-        end if
+        call uploadToGPU_if_absent(ESH(i+1,i))
+        call uploadToGPU_if_absent(Sigma_n(i+1,i))
+        call uploadToGPU_if_absent(Sigma_n(i+1,i+1))
 
         ! work1 = Sigma(i+1,i)Ga(i,i) + Sigma(i+1,i+1)Ga(i+1,i) - Tr(i+1,i)Gn(i,i)
+        call uploadToGPU_if_absent(Gr(i,i))
         call createGPU_only_async(work1, Sigma_n(i+1,i)%nrow, Gr(i,i)%nrow)
         call matmul_gpu(hh, one, Sigma_n(i+1,i), Gr(i,i), zero, work1, 'dag_2nd')
         call deleteGPU_async(Gr(i,i))
+        call uploadToGPU_if_absent(Gr(i,i+1))
         call matmul_gpu(hh, one, Sigma_n(i+1,i+1), Gr(i,i+1), one, work1, 'dag_2nd')
         call deleteGPU_async(Gr(i,i+1))
         call matmul_gpu(hh, minusOne, ESH(i+1,i), Gn(i,i), one, work1)
@@ -546,10 +589,12 @@ contains
 
         ! work1 = Sigma(i+1,i)Ga(i,i+1) + Sigma(i+1,i+1)Ga(i+1,i+1) - Tr(i+1,i)Gn(i,i+1)
         ! with Gn(i,i+1) = Gn(i+1,i)^dag
+        call uploadToGPU_if_absent(Gr(i+1,i))
         call createGPU_only_async(work1, Sigma_n(i+1,i)%nrow, Gr(i+1,i)%nrow)
         call matmul_gpu(hh, one, Sigma_n(i+1,i), Gr(i+1,i), zero, work1, 'dag_2nd')
         call deleteGPU_async(Sigma_n(i+1,i))
         call deleteGPU_async(Gr(i+1,i))
+        call uploadToGPU_if_absent(Gr(i+1,i+1))
         call matmul_gpu(hh, one, Sigma_n(i+1,i+1), Gr(i+1,i+1), one, work1, 'dag_2nd')
         call deleteGPU_async(Sigma_n(i+1,i+1))
         call matmul_gpu(hh, minusOne, ESH(i+1,i), Gn(i+1,i), one, work1, 'dag_2nd')
@@ -572,74 +617,25 @@ contains
     call copyFromGPU(Gn(nbl,nbl))
     call deleteGPU_async(Gn(nbl,nbl))
 
-    call destroy_tridiag_blk(Sigma_n, "Sigma_n")
-    call deallocate_blk_dns(Sigma_n)
-
-    contains
-    ! Recursive calculation of Sigma_n:
-    ! Sigma(i,i) = Sigma(i,i) + Tr(i,i+1) gns(i+1) Ta(i+1,i)
-    !                         - Tr(i,i+1) gsmr(i+1) Sigma(i+1,i)
-    !                         - Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)]
-    ! with gns(i+1) = gsmr(i+1) Sigma(i+1,i+1) gsmr(i+1)^dag.
-    ! Using Y = Tr(i,i+1) gsmr(i+1) and Sigma(i,i+1) = Sigma(i+1,i)^dag:
-    ! Sigma(i,i) = Sigma(i,i) + Y Sigma(i+1,i+1) Y^dag - X - X^dag,  X = Y Sigma(i+1,i)
-    ! 4 matrix products per block instead of 8 (gns is never formed)
-    !
-    subroutine calculate_sigma_n()
-      !Work: device-only temporaries
-      type(${MTYPE}$) :: Y, Z, X
-
-      ! if nbl = 1 => Sigma_n(1,1) is ready
-      if (nbl.eq.1) return
-
-      do i = nbl-1, 1, -1
-        ! (ESH(i,i+1) already on GPU if negf%tKeepESHonGPU)
-        if (.not. c_associated(ESH(i,i+1)%d_addr)) then
-          call createGPU_async(ESH(i,i+1))
-          call copyToGPU_async(ESH(i,i+1))
-        end if
-
-        ! Y = Tr(i,i+1) gsmr(i+1);  Tr(i,i+1) = ESH(i,i+1)
-        call createGPU_only_async(Y, ESH(i,i+1)%nrow, gsmr(i+1)%ncol)
-        call matmul_gpu(hh, one, ESH(i,i+1), gsmr(i+1), zero, Y)
-        if (.not. negf%tKeepESHonGPU) call deleteGPU_async(ESH(i,i+1))
-
-        ! Sigma(i,i) += Y Sigma(i+1,i+1) Y^dag  (= Tr gns(i+1) Ta)
-        call createGPU_only_async(Z, Y%nrow, Sigma_n(i+1,i+1)%ncol)
-        call matmul_gpu(hh, one, Y, Sigma_n(i+1,i+1), zero, Z)
-        call matmul_gpu(hh, one, Z, Y, one, Sigma_n(i,i), 'dag_2nd')
-        call deleteGPU_async(Z)
-
-        ! Sigma(i,i) -= X + X^dag;  X^dag = Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)
-        call createGPU_only_async(X, Y%nrow, Sigma_n(i+1,i)%ncol)
-        call matmul_gpu(hh, one, Y, Sigma_n(i+1,i), zero, X)
-        call deleteGPU_async(Y)
-        call matsum_gpu(hh, one, Sigma_n(i,i), minusOne, X, Sigma_n(i,i))
-        call matsum_gpu(hh, one, Sigma_n(i,i), minusOne, X, Sigma_n(i,i), 'dag_2nd')
-        call deleteGPU_async(X)
-      end do
-
-    end subroutine calculate_sigma_n
-
   end subroutine calculate_Gn_tridiag_blocks_${KIND}$
 #:enddef calculate_Gn_tridiag_blocks_template
 
   !--------------------------------------------------------------------------
-  ! Add all Self-enrgies to Sigma_n
-#:def add_sigma_n_template(KIND, CTYPE, MTYPE, CUDATYPE)
-  subroutine add_sigma_n_${KIND}$(negf, sigma_n)
-    class(TNegf) :: negf
-    type(${MTYPE}$) :: sigma_n(:,:)
+  ! If A has no device copy (d_addr null): allocate it and copy the host data.
+  ! If A is already on the device: do nothing (the device copy is trusted).
+  ! NOTE: blocks created with createAll (e.g. block_3_diag::init_tridiag_blk)
+  ! have an allocated but unfilled device copy and are therefore NOT uploaded.
+#:def uploadToGPU_if_absent_template(KIND, CTYPE, MTYPE, CUDATYPE)
+  subroutine uploadToGPU_if_absent_${KIND}$(A)
+    use iso_c_binding, only : c_associated
+    type(${MTYPE}$), intent(inout) :: A
 
-    type(TInteractionNode), pointer :: it
-    it => negf%interactList%first
-
-    do while (associated(it))
-      call it%inter%add_sigma_n(sigma_n, negf%iEloc, negf%iKloc, negf%spin)
-      it => it%next
-    end do
-  end subroutine add_sigma_n_${KIND}$
-#:enddef add_sigma_n_template
+    if (.not. c_associated(A%d_addr)) then
+      call createGPU_async(A)
+      call copyToGPU_async(A)
+    end if
+  end subroutine uploadToGPU_if_absent_${KIND}$
+#:enddef uploadToGPU_if_absent_template
 
 
 
@@ -976,7 +972,7 @@ contains
 
      $:calculate_Gn_tridiag_blocks_template(KIND, CTYPE, MTYPE, CUDATYPE)
 
-     $:add_sigma_n_template(KIND, CTYPE, MTYPE, CUDATYPE)
+     $:uploadToGPU_if_absent_template(KIND, CTYPE, MTYPE, CUDATYPE)
 
      $:calculate_single_transmission_2_contacts_template(KIND, CTYPE, MTYPE, CUDATYPE)
 

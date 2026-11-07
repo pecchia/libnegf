@@ -48,7 +48,7 @@ contains
   !
   !***********************************************************************
 
-  subroutine calculate_gsmr_blocks(negf,ESH,sbl,ebl,gsmr,keep_gsmr)
+  subroutine calculate_gsmr_blocks(negf,ESH,sbl,ebl,gsmr,keep_gsmr,sigma_n)
 
     !***********************************************************************
     !Input:
@@ -60,6 +60,11 @@ contains
     !sparse matrices array global variable gsmr(nbl) is available in memory
     !single blocks are allocated internally, array Gr(nbl,nbl)
     !must be allocated externally
+    !
+    !Optional sigma_n (in/out): on entry the bare Sigma_n (diag + lower
+    !blocks used); on exit the diagonal blocks are folded upward (see
+    !fold_sigma_n), as needed by calculate_Gn_tridiag_blocks.
+    !Requires sbl = nbl and keep_gsmr = .true.
     !***********************************************************************
 
     implicit none
@@ -70,6 +75,7 @@ contains
     integer, intent(in) :: sbl,ebl                 ! start block, end block
     type(z_DNS), dimension(:), intent(inout) :: gsmr
     logical, intent(in), optional :: keep_gsmr
+    type(z_DNS), dimension(:,:), intent(inout), optional :: sigma_n
 
     !Work
     !type(z_DNS), dimension(:,:), allocatable :: INV
@@ -89,6 +95,12 @@ contains
        keep = keep_gsmr
     end if
 
+    if (present(sigma_n)) then
+       if (.not.keep .or. sbl.ne.nbl) then
+          call error_msg("Error: gsmr with sigma_n requires sbl=nbl and keep_gsmr")
+       end if
+    end if
+
     nrow=ESH(sbl,sbl)%nrow
 
     call create(gsmr(sbl),nrow,nrow)
@@ -98,7 +110,10 @@ contains
 
     do i=sbl-1,ebl,-1
 
+       ! work1 = -Tr(i,i+1) gsmr(i+1)
        call prealloc_mult(ESH(i,i+1),gsmr(i+1),minusOne,work1)
+
+       if (present(sigma_n)) call fold_sigma_n(work1, i)
 
        if (.not.keep) then
           call destroy(gsmr(i+1))
@@ -120,6 +135,41 @@ contains
 
     end do
 
+    ! gsmr(ebl-1) is not needed, but Sigma_n must be folded down to ebl-1
+    if (present(sigma_n) .and. ebl.gt.1) then
+       i = ebl-1
+       call prealloc_mult(ESH(i,i+1),gsmr(i+1),minusOne,work1)
+       call fold_sigma_n(work1, i)
+       call destroy(work1)
+    end if
+
+  contains
+
+    ! Upward recursion of Sigma_n, given W = -Tr(i,i+1) gsmr(i+1) = -Y:
+    ! Sigma(i,i) = Sigma(i,i) + Tr(i,i+1) gns(i+1) Ta(i+1,i)
+    !                         - Tr(i,i+1) gsmr(i+1) Sigma(i+1,i)
+    !                         - Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)
+    ! with gns(i+1) = gsmr(i+1) Sigma(i+1,i+1) gsmr(i+1)^dag and
+    ! Sigma(i,i+1) = Sigma(i+1,i)^dag:
+    ! Sigma(i,i) = Sigma(i,i) + W Sigma(i+1,i+1) W^dag + X + X^dag,  X = W Sigma(i+1,i)
+    ! 3 matrix products per block (Y is shared with gsmr; gns is never formed)
+    subroutine fold_sigma_n(W, i)
+      type(z_DNS), intent(in) :: W
+      integer, intent(in) :: i
+
+      type(z_DNS) :: Z, Wdag, X, Xdag
+
+      call prealloc_mult(W, sigma_n(i+1,i+1), Z)
+      call zdagger(W, Wdag)
+      call prealloc_mult(Z, Wdag, sigma_n(i,i))
+      call destroy(Z, Wdag)
+
+      call prealloc_mult(W, sigma_n(i+1,i), X)
+      call zdagger(X, Xdag)
+      sigma_n(i,i)%val = sigma_n(i,i)%val + X%val + Xdag%val
+      call destroy(X, Xdag)
+
+    end subroutine fold_sigma_n
 
   end subroutine calculate_gsmr_blocks
 
@@ -225,56 +275,28 @@ contains
 
   ! Implements a new algorithm based on an iterative scheme to solve
   ! [ES - H - SigmaR] Gr = Sigma< Ga
-  ! The subroutine uses the gsmr(:) computed before and makes an iteration
-  ! upward to build gsmn and then downward to build the 3-diagonal blocks
-  subroutine calculate_Gn_tridiag_blocks(negf,ESH,SelfEneR,frm,ref,struct,gsmr,Gr,Gn)
+  ! Downward pass only: Sigma_n must be built (build_sigma_n) and folded
+  ! upward by calculate_gsmr_blocks(..., sigma_n=Sigma_n) beforehand.
+  subroutine calculate_Gn_tridiag_blocks(negf,ESH,Sigma_n,gsmr,Gr,Gn)
     type(TNegf), intent(in) :: negf
     type(z_DNS), dimension(:,:), intent(in) :: ESH, Gr
-    type(z_DNS), dimension(:), intent(in) :: SelfEneR, gsmr
-    real(dp), dimension(:), intent(in) :: frm
-    integer, intent(in) :: ref
-    type(Tstruct_info), intent(in) :: struct
+    type(z_DNS), dimension(:,:), intent(inout) :: Sigma_n
+    type(z_DNS), dimension(:), intent(in) :: gsmr
     type(z_DNS), dimension(:,:), intent(inout) :: Gn
 
     !Work
-    type(z_DNS), dimension(:,:), allocatable :: Sigma_n
-    type(z_DNS) :: work1, Ga, Gam
-    complex(dp) :: frmdiff
-    integer :: i, j
-    integer :: nbl, ncont, cb
+    type(z_DNS) :: work1, Ga
+    integer :: i, nbl
 
-    ncont = struct%num_conts
-    nbl = struct%num_PLs
-
-    !build Sigma_n from SelfEneR
-    call allocate_blk_dns(Sigma_n, nbl)
-    call init_tridiag_blk(Sigma_n, ESH)
-
-    call add_sigma_n(negf, Sigma_n)
-
-    ! Add contact self-energies
-    do j=1,ncont
-      frmdiff = frm(j) - frm(ref)
-      if (j.NE.ref .AND. ABS(frmdiff).GT.EPS10) THEN
-        cb=struct%cblk(j) ! block corresponding to contact j
-        call zspectral(SelfEneR(j),Gam)
-        Sigma_n(cb,cb)%val = Sigma_n(cb,cb)%val + frmdiff*Gam%val
-        call destroy(Gam)
-      endif
-    end do
-
-    call calculate_sigma_n()
+    nbl = size(ESH,1)
 
     call zdagger(Gr(1,1), Ga)
     call prealloc_mult(Sigma_n(1,1), Ga, work1)
     call prealloc_mult(Gr(1,1), work1, Gn(1,1))
     call destroy(Ga, work1)
 
-    if (nbl .eq. 1) then
-       call destroy_tridiag_blk(Sigma_n)
-       call deallocate_blk_dns(Sigma_n)
-       return
-    end if
+    if (nbl .eq. 1) return
+
     !Explicit formulae:
     !Gn(i+1,i) = gsmr(i+1)*[Sigma(i+1,i)Ga(i,i) + Sigma(i+1,i+1)Ga(i+1,i) - Tr(i+1,i)Gn(i,i)]
     !Gn(i,i+1) = [Gr(i,i)Sigma(i,i+1) + Gr(i,i+1)Sigma(i+1,i+1) - Gn(i,i)Ta(i,i+1)] * gsma(i+1)
@@ -316,61 +338,8 @@ contains
 
     end do
 
-    call destroy_tridiag_blk(Sigma_n)
-    call deallocate_blk_dns(Sigma_n)
-
-    contains
-    ! Recursive calculation of Sigma_n:
-    ! Sigma(i,i) = Sigma(i,i) + Tr(i,i+1) gns(i+1) Ta(i+1,i)
-    !                         - Tr(i,i+1) gsmr(i+1) Sigma(i+1,i)
-    !                         - Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)]
-    ! with gns(i+1) = gsmr(i+1) Sigma(i+1,i+1) gsmr(i+1)^dag.
-    ! Using Y = Tr(i,i+1) gsmr(i+1) and Sigma(i,i+1) = Sigma(i+1,i)^dag:
-    ! Sigma(i,i) = Sigma(i,i) + Y Sigma(i+1,i+1) Y^dag - X - X^dag,  X = Y Sigma(i+1,i)
-    ! 4 matrix products per block instead of 8 (gns is never formed)
-    !
-    subroutine calculate_sigma_n()
-      !Work
-      type(z_DNS) :: Y, Ydag, Z, X, Xdag
-
-      ! if nbl = 1 => Sigma_n(1,1) is ready
-      if (nbl.eq.1) return
-
-      do i = nbl-1, 1, -1
-        ! Y = Tr(i,i+1) gsmr(i+1);  Tr(i,i+1) = ESH(i,i+1)
-        call prealloc_mult(ESH(i,i+1), gsmr(i+1), Y)
-
-        ! Sigma(i,i) += Y Sigma(i+1,i+1) Y^dag  (= Tr gns(i+1) Ta)
-        call prealloc_mult(Y, Sigma_n(i+1,i+1), Z)
-        call zdagger(Y, Ydag)
-        call prealloc_mult(Z, Ydag, Sigma_n(i,i))
-        call destroy(Z, Ydag)
-
-        ! Sigma(i,i) -= X + X^dag;  X^dag = Sigma(i,i+1) gsmr^dag(i+1) Ta(i+1,i)
-        call prealloc_mult(Y, Sigma_n(i+1,i), X)
-        call zdagger(X, Xdag)
-        Sigma_n(i,i)%val = Sigma_n(i,i)%val - X%val - Xdag%val
-        call destroy(Y, X, Xdag)
-      end do
-
-    end subroutine calculate_sigma_n
-
   end subroutine calculate_Gn_tridiag_blocks
 
-  !--------------------------------------------------------------------------
-  ! Add all Self-enrgies to Sigma_n
-  subroutine add_sigma_n(negf, sigma_n)
-    class(TNegf) :: negf
-    type(z_DNS) :: sigma_n(:,:)
-
-    type(TInteractionNode), pointer :: it
-    it => negf%interactList%first
-
-    do while (associated(it))
-      call it%inter%add_sigma_n(sigma_n, negf%iEloc, negf%iKloc, negf%spin)
-      it => it%next
-    end do
-  end subroutine add_sigma_n
   !************************************************************************
   !
   ! Subroutine for transmission calculation
