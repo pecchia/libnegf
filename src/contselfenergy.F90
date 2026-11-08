@@ -248,6 +248,15 @@ contains
             else
               call pnegf%surface_green_cache%add(GS, label)
             end if
+#:if defined("SP_CACHE")
+            ! The memory cache stores GS in single precision: use the same
+            ! rounded GS in this pass, as the next passes retrieving it do
+            if (pnegf%tTransportSGF) then
+              call round_if_sp_cache(pnegf%surface_green_cache_T, GS)
+            else
+              call round_if_sp_cache(pnegf%surface_green_cache, GS)
+            end if
+#:endif
 
           endif
 
@@ -267,6 +276,21 @@ contains
     call stop_timer(pnegf, isgf)
 
   end subroutine surface_green
+
+#:if defined("SP_CACHE")
+  !---------------------------------------------------------------------------------------
+  !> Round GS to single precision if it is stored by a memory cache, whose entries
+  !> are single precision with SP_CACHE (the disk cache writes double precision)
+  subroutine round_if_sp_cache(cache, GS)
+    class(TMatrixCache), intent(in) :: cache
+    type(z_DNS), intent(inout) :: GS
+
+    select type (cache)
+    type is (TMatrixCacheMem)
+      GS%val = cmplx(cmplx(GS%val, kind=sp), kind=dp)
+    end select
+  end subroutine round_if_sp_cache
+#:endif
 
   !---------------------------------------------------------------------------------------
   !> Sizes of the index table of a memory SGF cache. k-points are indexed with the global

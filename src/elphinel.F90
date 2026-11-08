@@ -24,9 +24,10 @@
 
 module elphinel
   use ieee_arithmetic, only : isnan => ieee_is_nan
-  use ln_precision, only : sp, dp, lp => dp
+  use ln_precision, only : sp, dp
+  use ln_cache_precision, only : x_DNS, lp, MPI_XX_COMPLEX
   use mat_def, only : c_DNS, z_DNS
-  use mat_def, only : x_DNS => z_DNS, create, destroy, assignment(=)
+  use mat_def, only : create, destroy, assignment(=)
   use ln_math, only : cross_product, volume
   use ln_constants, only : pi, hbar2c2
   use interactions, only : TInteraction
@@ -37,7 +38,7 @@ module elphinel
   use distributions, only : bose
   use ln_cache
   use iso_c_binding
-  use mpi_f08, MPI_XX_COMPLEX => MPI_DOUBLE_COMPLEX
+  use mpi_f08
   use mpi_globals
   use inversions, only : inverse
   use equiv_kpoints, only : TEqPoint, TEqPointsArray, create, destroy
@@ -823,7 +824,7 @@ contains
   !
   subroutine get_sigma_n_blk(this, blk_sigma_n, en_index, k_index, spin)
     class(ElPhonInel) :: this
-    type(x_DNS), dimension(:,:), intent(inout) :: blk_sigma_n
+    type(z_DNS), dimension(:,:), intent(inout) :: blk_sigma_n
     integer, intent(in), optional :: en_index
     integer, intent(in), optional :: k_index
     integer, intent(in), optional :: spin
@@ -860,7 +861,7 @@ contains
   !
   subroutine get_sigma_n_mat(this, sigma_n, ii, jj, en_index, k_index, spin)
     class(ElPhonInel) :: this
-    type(x_DNS), intent(inout) :: sigma_n
+    type(z_DNS), intent(inout) :: sigma_n
     integer, intent(in) :: ii
     integer, intent(in) :: jj
     integer, intent(in), optional :: en_index

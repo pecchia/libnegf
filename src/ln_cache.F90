@@ -21,7 +21,8 @@
 module ln_cache
   use iso_c_binding
   use ln_precision, only: dp
-  use mat_def, only: z_DNS, c_DNS, x_DNS => z_DNS, destroy, assignment(=)
+  use mat_def, only: z_DNS, c_DNS, destroy, assignment(=)
+  use ln_cache_precision, only : x_DNS
   use globals
   use outmatrix, only: outmat_c, inmat_c
   use ln_messages, only: error_msg

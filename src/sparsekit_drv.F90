@@ -179,6 +179,8 @@ MODULE sparsekit_drv
      module procedure zmultdnss
      module procedure zmatmul
      module procedure zmatmuls
+     module procedure cmultdns
+     module procedure cmultdnss
   end interface
   interface extract
      module procedure zextract_csr
@@ -1928,6 +1930,45 @@ CONTAINS
 
   end subroutine zmultdns
 
+
+  !***********************************************************************
+  !  Single precision version of zmultdns: C = A*B, or C = C + A*B if C
+  !  is allocated on entry
+  !  (dummies are not named *_dns: C_dns would clash with the type c_DNS)
+  !***********************************************************************
+  subroutine cmultdns(A,B,C)
+
+    implicit none
+    external cgemm
+
+    type(c_DNS) :: A,B,C
+    integer :: M,N,K
+    complex(sp), parameter :: s = (1.0_sp, 0.0_sp)
+    complex(sp) :: beta
+
+    IF (A%ncol.NE.B%nrow) THEN
+       call error_msg('(cmultdns) A B',MISMATCH)
+    ENDIF
+
+    M = A%nrow
+    N = B%ncol
+    K = A%ncol
+
+    IF (allocated(C%val)) THEN
+      IF(C%nrow .ne. M .or. C%ncol .ne. N) THEN
+         call error_msg('(cmultdns) C',MISMATCH)
+      ENDIF
+      beta = (1.0_sp,0.0_sp)
+    ELSE
+      CALL create(C,M,N)
+      beta = (0.0_sp,0.0_sp)
+    ENDIF
+
+    CALL CGEMM('N','N', M, N, K, s, A%val, M, &
+            B%val, B%nrow, beta, C%val, M)
+
+  end subroutine cmultdns                                      
+  
   !***********************************************************************
 
   subroutine zmatmul(A,B,C_dns)
@@ -2072,6 +2113,44 @@ CONTAINS
             B_dns%val, B_dns%nrow, beta, C_dns%val, M)
 
   end subroutine zmultdnss
+
+  !***********************************************************************
+  !  Single precision version of zmultdnss: C = s*A*B, or C = C + s*A*B if
+  !  C is allocated on entry
+  !***********************************************************************
+  subroutine cmultdnss(A,B,s,C)
+
+    implicit none
+    external cgemm
+
+    type(c_DNS) :: A,B,C
+    complex(sp) :: s
+    integer :: M,N,K
+    complex(sp) :: beta
+
+    IF (A%ncol.NE.B%nrow) THEN
+       call error_msg('(cmultdnss) A B',MISMATCH)
+    ENDIF
+
+    M = A%nrow
+    N = B%ncol
+    K = A%ncol
+
+    IF (allocated(C%val)) THEN
+      IF(C%nrow .ne. M .or. C%ncol .ne. N) THEN
+        call error_msg('(cmultdnss) C',MISMATCH)
+      ENDIF
+      beta = (1.0_sp,0.0_sp)
+    ELSE
+      CALL create(C,M,N)
+      beta = (0.0_sp,0.0_sp)
+    ENDIF
+
+    ! C = beta C + s A * B
+    CALL CGEMM('N','N', M, N, K, s, A%val, M, &
+            B%val, B%nrow, beta, C%val, M)
+
+  end subroutine cmultdnss
 
   !***********************************************************************
 

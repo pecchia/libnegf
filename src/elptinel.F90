@@ -23,8 +23,10 @@
 
 module elptinel
   use ieee_arithmetic, only : isnan => ieee_is_nan
-  use ln_precision, only : sp, dp, lp => dp
-  use mat_def, only : c_csr, z_csr, c_dns, z_dns, x_dns => z_dns, x_csr => z_csr
+  use ln_precision, only : sp, dp
+  use ln_cache_precision, only : x_DNS, lp, MPI_XX_COMPLEX
+  ! The momentum matrix stays in double precision (converted to x_DNS per block)
+  use mat_def, only : c_csr, z_csr, c_dns, z_dns, x_csr => z_csr
   use mat_def, only : create, destroy, print_mat, assignment(=)
   use block_3_diag, only : init_tridiag_blk, destroy_tridiag_blk, blk2dns
   use block_3_diag, only : csr2blk3diag
@@ -40,7 +42,7 @@ module elptinel
   use ln_types, only : TMatrixArrayHS
   use ln_enums, only : interaction_models
   use iso_c_binding
-  use mpi_f08, MPI_XX_COMPLEX => MPI_DOUBLE_COMPLEX
+  use mpi_f08
   use mpi_globals
   use clock
   use ln_timers, only : TTimerSet, timers, timer_start_if, timer_stop_if
@@ -70,16 +72,16 @@ module elptinel
     type(TBasisCenters) :: basis
 
     !> Number of photons
-    real(lp) :: Nq
+    real(dp) :: Nq
 
     !> A general scalar coupling
-    real(lp) :: coupling
+    real(dp) :: coupling
 
     !> The refraction index
-    real(lp) :: nr
+    real(dp) :: nr
 
     !> Supercell volume for integrations in units of nm
-    real(lp) :: cell_volume
+    real(dp) :: cell_volume
 
     !> The first dimension of Pbkl and total number of Kpoints
     integer :: nK
@@ -88,7 +90,7 @@ module elptinel
     integer::poldir
 
     !> prefactor (squared) for the el-photon coupling
-    real(lp) :: prefactor
+    real(dp) :: prefactor
 
     !> The polarization matrices (R_i - R_j) * H_ij in units of nm * ev
     !Dimension: nK, 3 polarazations
@@ -102,11 +104,11 @@ module elptinel
     !> Energy grid. Local num of energy points
     integer :: nE_local
     !> Energy grid spacing
-    real(lp) :: dE
+    real(dp) :: dE
     !> Number of frequency points for the blackbody spectrum
     integer :: nfreq
     !> Blackbody temperature in energy units (eV)
-    real(lp) :: kbT
+    real(dp) :: kbT
     !> Whether spontaneous emission is included in the calculation
     logical :: tSpontEmission
 
@@ -156,21 +158,21 @@ contains
     type(ElPhoton) :: this
     type(MPI_Comm), intent(in) :: comm
     type(TBasisCenters), intent(in) :: basis
-    real(lp), dimension(:), intent(in) :: coupling
-    real(lp), intent(in) :: cell_vol
-    real(lp), intent(in) :: nr
-    real(lp), intent(in) :: Ephoton
-    real(lp), intent(in) :: intensity
+    real(dp), dimension(:), intent(in) :: coupling
+    real(dp), intent(in) :: cell_vol
+    real(dp), intent(in) :: nr
+    real(dp), intent(in) :: Ephoton
+    real(dp), intent(in) :: intensity
     integer, intent(in) :: poldir
     integer, intent(in) :: niter
-    real(lp), intent(in) :: kbT
+    real(dp), intent(in) :: kbT
     integer, intent(in) :: nfreq
     logical, intent(in) :: tSpontEmission
     logical, intent(in) :: tridiag
     integer, intent(in) :: modeltype
 
     integer :: i
-    real(lp) :: c__au
+    real(dp) :: c__au
 
     this%model_type = modeltype
     this%count_iter = 0
@@ -184,7 +186,7 @@ contains
 
     ! Nq = I_au*Vol/(Ephoton*c_au)
     ! This is the number of photons in the volume Vol, given the intensity I_au and photon energy Ephoton
-    c__au = 1.0_lp / alpha
+    c__au = 1.0_dp / alpha
     this%Nq = intensity * cell_vol / (Ephoton * c__au)
     this%nr = nr
     this%wq = Ephoton
@@ -245,7 +247,7 @@ contains
   !--------------------------------------------------------------------------
   subroutine set_EnGrid(this, deltaE, nE_global, nE_local)
     class(ElPhoton) :: this
-    real(lp), intent(in) :: deltaE
+    real(dp), intent(in) :: deltaE
     integer, intent(in) :: nE_global
     integer, intent(in) :: nE_local
 
@@ -803,7 +805,7 @@ contains
     ! k-loop for the self energy
     do iKK = 1, this%nk
 
-      call csr2blk3diag(this%Pcsr(iKK,1), Pblk, this%struct%mat_PL_start)
+      call get_Pblk(this%Pcsr(iKK,1), this%struct%mat_PL_start, Pblk)
 
       do ibl = 1, nbl
         !print*, "Debug Pblk", ibl
@@ -816,7 +818,7 @@ contains
         end if
 
       end do
-      call destroy_tridiag_blk(Pblk)
+      call destroy_Pblk(Pblk)
     end do
 
     deallocate(pAA)
@@ -848,7 +850,7 @@ contains
         fac_plus = cmplx(0.0, -0.5*this%Nq, lp)
 
         call selfenergy(this%cart_comm, this%timerset, pAA, fac_min, fac_plus, iEshift, &
-            & Pblk(iM,jM), Pblk(iMdag,jMdag), iKK, NE, NEloc, pSigma, this%prefactor)
+            & Pblk(iM,jM), Pblk(iMdag,jMdag), iKK, NE, NEloc, pSigma, real(this%prefactor, lp))
 
         call release_pointers_A()
 
@@ -858,7 +860,7 @@ contains
         fac_plus = (0.0_lp, -0.5_dp)
 
         call selfenergy(this%cart_comm, this%timerset, pGG, fac_min, fac_plus, iEshift, &
-            & Pblk(iM,jM), Pblk(iMdag,jMdag), iKK, NE, NEloc, pSigma, this%prefactor)
+            & Pblk(iM,jM), Pblk(iMdag,jMdag), iKK, NE, NEloc, pSigma, real(this%prefactor, lp))
 
         call release_Gn_upper()
 
@@ -1121,7 +1123,7 @@ contains
     ! k-loop for the self energy
     do iKK = 1, this%nk
 
-      call csr2blk3diag(this%Pcsr(iKK,1), Pblk, this%struct%mat_PL_start)
+      call get_Pblk(this%Pcsr(iKK,1), this%struct%mat_PL_start, Pblk)
 
       do ibl = 1, nbl
         call compute_diagonal_contributions()
@@ -1131,7 +1133,7 @@ contains
         end if
 
       end do
-      call destroy_tridiag_blk(Pblk)
+      call destroy_Pblk(Pblk)
     end do
 
     deallocate(pGG)
@@ -1159,7 +1161,7 @@ contains
         fac_plus = cmplx(this%Nq + 1, 0.0, lp)
 
         call selfenergy(this%cart_comm, this%timerset, pGG, fac_min, fac_plus, iEshift, &
-            & Pblk(iM,jM), Pblk(iMdag,jMdag), iKK, NE, NEloc, pSigma, this%prefactor)
+            & Pblk(iM,jM), Pblk(iMdag,jMdag), iKK, NE, NEloc, pSigma, real(this%prefactor, lp))
 
         call release_Gn_upper()
       end if
@@ -1594,5 +1596,52 @@ contains
     close(unit_number_imag)
 
   end subroutine dump_mat
+
+  !--------------------------------------------------------------------------
+  !> Tridiagonal blocks of the momentum matrix (stored as z_CSR) in x_DNS
+  !> format. With SP_CACHE the blocks are extracted in double precision and
+  !> converted.
+  subroutine get_Pblk(Pcsr, indblk, Pblk)
+    type(x_CSR), intent(in) :: Pcsr
+    integer, intent(in) :: indblk(:)
+    type(x_DNS), intent(inout) :: Pblk(:,:)
+
+#:if defined("SP_CACHE")
+    type(z_DNS), allocatable :: zPblk(:,:)
+    integer :: i, nbl
+
+    nbl = size(Pblk,1)
+    allocate(zPblk(nbl,nbl))
+    call csr2blk3diag(Pcsr, zPblk, indblk)
+    Pblk(1,1) = zPblk(1,1)
+    do i = 2, nbl
+      Pblk(i,i) = zPblk(i,i)
+      Pblk(i-1,i) = zPblk(i-1,i)
+      Pblk(i,i-1) = zPblk(i,i-1)
+    end do
+    call destroy_tridiag_blk(zPblk)
+    deallocate(zPblk)
+#:else
+    call csr2blk3diag(Pcsr, Pblk, indblk)
+#:endif
+
+  end subroutine get_Pblk
+
+  !--------------------------------------------------------------------------
+  !> Release the blocks created by get_Pblk
+  subroutine destroy_Pblk(Pblk)
+    type(x_DNS), intent(inout) :: Pblk(:,:)
+
+    integer :: i, nbl
+
+    nbl = size(Pblk,1)
+    call destroy(Pblk(1,1))
+    do i = 2, nbl
+      call destroy(Pblk(i,i))
+      call destroy(Pblk(i-1,i))
+      call destroy(Pblk(i,i-1))
+    end do
+
+  end subroutine destroy_Pblk
 
 end module elptinel

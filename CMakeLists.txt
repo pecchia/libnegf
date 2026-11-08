@@ -11,6 +11,7 @@ libnegf_load_build_settings()
 # Some setting output
 message(STATUS "libNEGF WITH_MPI: " ${WITH_MPI})
 message(STATUS "libNEGF WITH_GPU: " ${WITH_TRANSPORT_GPU})
+message(STATUS "libNEGF WITH_SP_CACHE: " ${WITH_SP_CACHE})
 # message(STATUS "libNEGF WITH_HILBERT: " ${WITH_HILBERT})
 
 if(WITH_TRANSPORT_GPU)

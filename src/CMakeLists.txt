@@ -4,6 +4,7 @@ set(sources-fpp
     ln_extract.F90
     input_output.F90
     ln_cache.F90
+    ln_cache_precision.F90
     lib_param.F90
     ln_enums.F90
     ln_types.F90
@@ -72,6 +73,10 @@ endif()
 
 if(WITH_TRANSPORT_GPU)
   list(APPEND fyppdefs -DGPU)
+endif()
+
+if(WITH_SP_CACHE)
+  list(APPEND fyppdefs -DSP_CACHE)
 endif()
 
 set(sources-fpp-f90)

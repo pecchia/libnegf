@@ -15,6 +15,10 @@ option(WITH_OMP "Whether OMP should be used" TRUE)
 # GPU support 
 option(WITH_TRANSPORT_GPU "Whether CUDA should be used" FALSE)
 
+# Single precision storage of the caches (G_r, G_n, SGF, inelastic Sigma)
+# and of the inelastic self-energy kernels (experimental)
+option(WITH_SP_CACHE "Whether caches and inelastic self-energies use single precision" FALSE)
+
 # Note, this option does not work yet, so leave it to false
 option(WITH_HILBERT "Whether enable the Hilbert transform in inelastic scattering" FALSE)
 
