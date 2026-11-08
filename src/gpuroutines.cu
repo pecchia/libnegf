@@ -1193,7 +1193,8 @@ extern "C" int cu_meminfo(size_t* freemem, size_t* totalmem) {
 // Diagnostics: synchronise the device (pending cudaFreeAsync are completed),
 // then print driver free/total memory, the stream-ordered pool reserved/used
 // memory and the pool high watermark of used memory since the last call
-// (reset here), plus host VmRSS/VmHWM (kB) from /proc/self/status.
+// (reset here), plus host VmRSS/VmHWM (kB) from /proc/self/status; VmHWM is
+// also reset, so both peaks refer to the interval since the previous call.
 extern "C" int cu_printMemInfo(int rank, const char* tag) {
     CUDA_CHECK(cudaDeviceSynchronize());
     size_t freemem = 0, totalmem = 0;
@@ -1213,6 +1214,13 @@ extern "C" int cu_printMemInfo(int rank, const char* tag) {
             if (strncmp(line, "VmHWM:", 6) == 0) sscanf(line + 6, "%ld", &vmhwm);
         }
         fclose(fp);
+    }
+    // Reset VmHWM to the current RSS, so the next call reports the peak
+    // since this one (Linux >= 4.0)
+    FILE* fc = fopen("/proc/self/clear_refs", "w");
+    if (fc) {
+        fputs("5", fc);
+        fclose(fc);
     }
     const double GB = 1.0e9;
     printf("MEM [%s] rank %d: GPU free %.3f / %.3f GB | pool reserved %.3f"

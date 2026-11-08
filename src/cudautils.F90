@@ -544,6 +544,7 @@ end interface
 
    ! Diagnostics: GPU free/total, pool reserved/used/peak (peak is reset at
    ! each call, i.e. it is the peak since the previous call), host RSS/HWM
+   ! (HWM is also reset at each call)
    subroutine printMemInfo(rank, tag)
      integer, intent(in) :: rank
      character(*), intent(in) :: tag
