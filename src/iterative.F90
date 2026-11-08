@@ -267,6 +267,10 @@ CONTAINS
 
     call allocate_gsm(gsmr,nbl)
     call calculate_gsmr_blocks(negf,ESH,nbl,2,gsmr,sigma_n=Sigma_n)
+#:if defined("GPU")
+    ! The folded Sigma_n now lives on the GPU: drop the host copies
+    call release_host_sigma_n(Sigma_n)
+#:endif
 
     call allocate_blk_dns(Gr,nbl)
     ! compute Gr(1,1)
@@ -1150,6 +1154,39 @@ CONTAINS
   end subroutine clear_gsm
 
 #:if defined("GPU")
+  !**********************************************************************
+  ! After calculate_gsmr_blocks(..., sigma_n=Sigma_n) the folded diagonal
+  ! and lower blocks of Sigma_n live on the GPU, where
+  ! calculate_Gn_tridiag_blocks uses them. Their host copies are stale (diagonal)
+  ! or no longer needed, and the upper blocks Sigma_n(i,i+1) are never used.
+  ! Free the host storage and keep nrow/ncol, which the GPU routines need.
+  ! Blocks without a device copy (nbl = 1: gsmr returns early) are kept.
+  !**********************************************************************
+  subroutine release_host_sigma_n(Sigma_n)
+    use iso_c_binding, only : c_associated
+    type(z_DNS), dimension(:,:), intent(inout) :: Sigma_n
+
+    integer :: i, nbl
+
+    nbl = size(Sigma_n,1)
+    do i = 1, nbl
+      call release(Sigma_n(i,i), c_associated(Sigma_n(i,i)%d_addr))
+      if (i < nbl) then
+        call release(Sigma_n(i+1,i), c_associated(Sigma_n(i+1,i)%d_addr))
+        call release(Sigma_n(i,i+1), .true.)
+      end if
+    end do
+
+  contains
+
+    subroutine release(A, doit)
+      type(z_DNS), intent(inout) :: A
+      logical, intent(in) :: doit
+      if (doit .and. allocated(A%val)) call log_deallocate(A%val)
+    end subroutine release
+
+  end subroutine release_host_sigma_n
+
   !**********************************************************************
   ! Decide which blocks can stay on GPU across gsmr, Gr and Gn.
   ! With D = diagonal and O = off-diagonal (both sides) sizes:

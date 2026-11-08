@@ -38,6 +38,9 @@ module integrations
  use contselfenergy
  use ln_timers, only : timers
  use energy_mesh
+#:if defined("GPU")
+ use cudautils, only : printMemInfo
+#:endif
  use interactions
  use ln_elastic
  use ln_inelastic
@@ -1242,6 +1245,9 @@ contains
     if (negf%readOldSGF == COMP_SGF) negf%readOldSGF = COMPSAVE_SGF
 
     scba: do while (.not.negf%scbaDriverInelastic%is_converged() .and. scba_iter <= scba_niter_inela)
+#:if defined("GPU")
+      call print_scba_mem(negf, scba_iter, 'start')
+#:endif
 
       if (negf%cartComm%rank == 0) then
         call write_info(negf%verbose, 30, ' INELASTIC SCBA ITERATION', scba_iter)
@@ -1254,6 +1260,7 @@ contains
          call set_scba_iter_elphoton(0, negf%interactList)
       end if
 
+      call release_G_caches(negf)
       negf%curr_mat = 0.0_dp
       ! Loop over local k-points
       kloop: do iK = 1, size(negf%local_k_index)
@@ -1330,6 +1337,9 @@ contains
 
       enddo kloop
       negf%readOldSGF = READ_SGF
+#:if defined("GPU")
+      call print_scba_mem(negf, scba_iter, 'after E-k loop')
+#:endif
 
       ! ---------------------------------------------------------------------
       ! COMPUTE SELF-ENERGIES
@@ -1371,6 +1381,9 @@ contains
       call stop_timer(negf, timers%MPIGather)
 #:endif
 
+#:if defined("GPU")
+      call print_scba_mem(negf, scba_iter, 'end')
+#:endif
       scba_iter = scba_iter + 1
 
     end do scba
@@ -1921,6 +1934,9 @@ contains
     scba_iter = 0
 
     scba: do while (.not.negf%scbaDriverInelastic%is_converged() .and. scba_iter <= scba_niter_inela)
+#:if defined("GPU")
+      call print_scba_mem(negf, scba_iter, 'start')
+#:endif
 
       if (negf%cartComm%rank == 0) then
         call write_info(negf%verbose, 30, ' INELASTIC SCBA ITERATION', scba_iter)
@@ -1933,6 +1949,9 @@ contains
       end if
 
       call EKloop()
+#:if defined("GPU")
+      call print_scba_mem(negf, scba_iter, 'after E-k loop')
+#:endif
 
       ! ---------------------------------------------------------------------
       ! COMPUTE SELF-ENERGIES
@@ -1971,6 +1990,9 @@ contains
       call stop_timer(negf, timers%MPIGather)
 #:endif
 
+#:if defined("GPU")
+      call print_scba_mem(negf, scba_iter, 'end')
+#:endif
       scba_iter = scba_iter + 1
 
     end do scba
@@ -2013,6 +2035,9 @@ contains
 
       ! Call E-k loop to update Gn after photon absorption
       call EKloop()
+#:if defined("GPU")
+      call print_scba_mem(negf, scba_iter, 'after E-k loop')
+#:endif
 
       call electron_current_meir_wingreen(negf)
 
@@ -2023,6 +2048,7 @@ contains
     end subroutine photon_absorption
 
     subroutine EKloop()
+      call release_G_caches(negf)
       negf%curr_mat = 0.0_dp
       ! Loop over local k-points
       kloop: do iK = 1, size(negf%local_k_index)
@@ -2192,6 +2218,9 @@ contains
     scba_iter = 0
 
     scba: do while (.not.negf%scbaDriverInelastic%is_converged() .and. scba_iter <= scba_niter_inela)
+#:if defined("GPU")
+      call print_scba_mem(negf, scba_iter, 'start')
+#:endif
 
       if (negf%cartComm%rank == 0) then
         call write_info(negf%verbose, 30, ' INELASTIC SCBA ITERATION', scba_iter)
@@ -2205,6 +2234,9 @@ contains
       end if
 
       call EKloop()
+#:if defined("GPU")
+      call print_scba_mem(negf, scba_iter, 'after E-k loop')
+#:endif
 
       ! ---------------------------------------------------------------------
       ! COMPUTE SELF-ENERGIES
@@ -2253,6 +2285,9 @@ contains
         call dump_Gn_mat_and_A(Gn_mat, A_mat, scba_iter)
       end if
 
+#:if defined("GPU")
+      call print_scba_mem(negf, scba_iter, 'end')
+#:endif
       scba_iter = scba_iter + 1
 
     end do scba
@@ -2297,6 +2332,9 @@ contains
 
       ! Call E-k loop to update Gn after photon absorption
       call EKloop()
+#:if defined("GPU")
+      call print_scba_mem(negf, scba_iter, 'after E-k loop')
+#:endif
 
       call electron_current_meir_wingreen(negf)
 
@@ -2321,6 +2359,7 @@ contains
 
     subroutine EKloop()
 
+      call release_G_caches(negf)
       negf%curr_mat = 0.0_dp
       if (negf%dump_pdos) then
          A_mat = 0.0_dp
@@ -2402,6 +2441,35 @@ contains
 
   !---------------------------------------------------------------------------
 #:if defined("MPI")
+  !---------------------------------------------------------------------------
+  ! Release the G_r/G_n caches before an E-k pass. They are read only by
+  ! compute_Sigmas_* after the pass (already done for the previous one), and
+  ! are refilled by set_Gr_inel/set_Gn_inel at each E-point. Without this the
+  ! previous pass's copies stay allocated through the whole pass.
+  subroutine release_G_caches(negf)
+    type(Tnegf), intent(inout) :: negf
+
+    if (associated(negf%G_r)) call negf%G_r%destroy()
+    if (associated(negf%G_n)) call negf%G_n%destroy()
+  end subroutine release_G_caches
+
+#:if defined("GPU")
+  !---------------------------------------------------------------------------
+  ! Diagnostics: GPU/host memory per rank at a point of the inelastic SCBA loop.
+  ! Pool "used" should be ~0 outside the E-k loop (all blocks released) and
+  ! "peak" is the maximum pool usage since the previous call.
+  subroutine print_scba_mem(negf, scba_iter, where)
+    type(Tnegf), intent(in) :: negf
+    integer, intent(in) :: scba_iter
+    character(*), intent(in) :: where
+
+    character(64) :: tag
+
+    write(tag, '(a,i0,a,a)') 'SCBA ', scba_iter, ' ', where
+    call printMemInfo(negf%cartComm%rank, tag)
+  end subroutine print_scba_mem
+#:endif
+
   subroutine gather_currents(negf)
     type(Tnegf) :: negf
 

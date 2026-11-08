@@ -29,7 +29,7 @@ module cudautils
    use mat_def
    use ln_types, only : cublasHandle, cusolverDnHandle
    use iso_c_binding, only : c_int, c_int32_t, c_int64_t, c_size_t, &
-                           & c_loc, c_null_ptr, c_ptr, c_bool, c_intptr_t
+                           & c_loc, c_null_ptr, c_ptr, c_bool, c_intptr_t, c_null_char
    use, intrinsic :: ieee_arithmetic
    use ln_messages
    implicit none
@@ -80,6 +80,7 @@ module cudautils
    public :: getDeviceProperties
    public :: getDevMemInfo
    public :: trimMemPool
+   public :: printMemInfo
 
 
    interface createGPU
@@ -376,6 +377,13 @@ module cudautils
        use iso_c_binding
      end function cu_trimMemPool
 
+     ! Print GPU (driver + pool) and host memory usage (synchronises the device)
+     integer(c_int) function cu_printMemInfo(rank, tag) bind(C, name='cu_printMemInfo')
+       use iso_c_binding
+       integer(c_int), value :: rank
+       character(kind=c_char), dimension(*) :: tag
+     end function cu_printMemInfo
+
    #:for PREC in PRECISIONS
      #:set CTYPE = CHAR_ABBREVS['complex'][PREC]
      #:set C_BIND_CMPLX = ISO_C_BIND_TYPES['complex'][PREC]
@@ -533,6 +541,15 @@ end interface
      integer :: err
      err = cu_trimMemPool()
    end subroutine trimMemPool
+
+   ! Diagnostics: GPU free/total, pool reserved/used/peak (peak is reset at
+   ! each call, i.e. it is the peak since the previous call), host RSS/HWM
+   subroutine printMemInfo(rank, tag)
+     integer, intent(in) :: rank
+     character(*), intent(in) :: tag
+     integer :: err
+     err = cu_printMemInfo(int(rank, c_int), trim(tag)//c_null_char)
+   end subroutine printMemInfo
 
    subroutine getDeviceProperties(dev)
      integer(4) :: dev

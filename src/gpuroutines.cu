@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 #include <type_traits>
 
@@ -1187,6 +1188,39 @@ extern "C" int cu_meminfo(size_t* freemem, size_t* totalmem) {
         *freemem += static_cast<size_t>(reserved - used);
     }
     return cudaStatus;
+}
+
+// Diagnostics: synchronise the device (pending cudaFreeAsync are completed),
+// then print driver free/total memory, the stream-ordered pool reserved/used
+// memory and the pool high watermark of used memory since the last call
+// (reset here), plus host VmRSS/VmHWM (kB) from /proc/self/status.
+extern "C" int cu_printMemInfo(int rank, const char* tag) {
+    CUDA_CHECK(cudaDeviceSynchronize());
+    size_t freemem = 0, totalmem = 0;
+    CUDA_CHECK(cudaMemGetInfo(&freemem, &totalmem));
+    cudaMemPool_t pool = default_mem_pool();
+    cuuint64_t reserved = 0, used = 0, usedHigh = 0, zero = 0;
+    CUDA_CHECK(cudaMemPoolGetAttribute(pool, cudaMemPoolAttrReservedMemCurrent, &reserved));
+    CUDA_CHECK(cudaMemPoolGetAttribute(pool, cudaMemPoolAttrUsedMemCurrent, &used));
+    CUDA_CHECK(cudaMemPoolGetAttribute(pool, cudaMemPoolAttrUsedMemHigh, &usedHigh));
+    CUDA_CHECK(cudaMemPoolSetAttribute(pool, cudaMemPoolAttrUsedMemHigh, &zero));
+    long vmrss = -1, vmhwm = -1;
+    FILE* fp = fopen("/proc/self/status", "r");
+    if (fp) {
+        char line[256];
+        while (fgets(line, sizeof(line), fp)) {
+            if (strncmp(line, "VmRSS:", 6) == 0) sscanf(line + 6, "%ld", &vmrss);
+            if (strncmp(line, "VmHWM:", 6) == 0) sscanf(line + 6, "%ld", &vmhwm);
+        }
+        fclose(fp);
+    }
+    const double GB = 1.0e9;
+    printf("MEM [%s] rank %d: GPU free %.3f / %.3f GB | pool reserved %.3f"
+           " used %.3f peak %.3f GB | host RSS %.3f HWM %.3f GB\n",
+           tag, rank, freemem / GB, totalmem / GB, reserved / GB, used / GB,
+           usedHigh / GB, vmrss * 1024.0 / GB, vmhwm * 1024.0 / GB);
+    fflush(stdout);
+    return 0;
 }
 
 // Release the unused memory of the pool to the driver, e.g. for libraries
