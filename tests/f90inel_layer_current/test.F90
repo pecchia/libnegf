@@ -21,8 +21,8 @@
 !> Inelastic SCBA with polar-optical phonons on the 100-site chain of f90_transmission.
 !>
 !> Layer currents and Meir-Wingreen currents are computed on the same energy grid twice:
-!> on all tasks with one energy point per task, where the working G blocks are moved into
-!> the G_r/G_n caches, and on one task only, where they are copied. The two must agree.
+!> on all tasks with one energy point per task, and on one task holding all the points.
+!> The two must agree.
 program test
 
   use libnegf
@@ -33,7 +33,7 @@ program test
   implicit none
 
   integer, parameter :: wp = kind(1.d0)
-  !> Relative tolerance between the runs with moved and with copied blocks
+  !> Relative tolerance between the runs on all tasks and on one task
   real(wp), parameter :: tolerance = 1.0e-10_wp
   !> Relative tolerances of current conservation and of the comparison with the reference
   real(wp), parameter :: conservationTol = 1.0e-5_wp, referenceTol = 1.0e-6_wp
@@ -57,43 +57,43 @@ program test
   color = merge(0, MPI_UNDEFINED, rank == 0)
   call MPI_Comm_split(MPI_COMM_WORLD, color, rank, singleComm, ierr)
 
-  call check_moved_against_copied(.true.)
-  call check_moved_against_copied(.false.)
+  call check_distributed_against_serial(.true.)
+  call check_distributed_against_serial(.false.)
 
   if (rank == 0) write(*,*) 'Done'
   call MPI_Finalize(ierr)
 
 contains
 
-  !> Run on all tasks (blocks moved) and on one task (blocks copied), and compare
-  subroutine check_moved_against_copied(tLayerCurrents)
+  !> Run on all tasks (one point per task) and on one task (all points), and compare
+  subroutine check_distributed_against_serial(tLayerCurrents)
     logical, intent(in) :: tLayerCurrents
 
-    real(wp), allocatable :: moved(:,:), copied(:,:), total(:)
+    real(wp), allocatable :: distributed(:,:), serial(:,:), total(:)
     real(wp) :: scale
     character(len=32) :: name
 
     name = merge('layer currents', 'Meir-Wingreen ', tLayerCurrents)
 
-    call compute_currents(MPI_COMM_WORLD, nRanks, tLayerCurrents, moved)
+    call compute_currents(MPI_COMM_WORLD, nRanks, tLayerCurrents, distributed)
     if (rank == 0) then
-      call compute_currents(singleComm, nRanks, tLayerCurrents, copied)
+      call compute_currents(singleComm, nRanks, tLayerCurrents, serial)
     end if
     call MPI_Barrier(MPI_COMM_WORLD, ierr)
 
     if (rank /= 0) return
 
     write(*,*) trim(name), ': current per interface (summed over energies)'
-    total = sum(moved, dim=1)
+    total = sum(distributed, dim=1)
     scale = maxval(abs(total))
     write(*,'(10ES25.16)') total
-    write(*,*) trim(name), ': max difference moved/copied ', maxval(abs(moved - copied))
+    write(*,*) trim(name), ': max difference distributed/serial ', maxval(abs(distributed - serial))
 
     if (scale < 1.0e-8_wp) then
       call fail('Vanishing current in '//trim(name))
     end if
-    if (maxval(abs(moved - copied)) > tolerance * maxval(abs(moved))) then
-      call fail('Moved and copied cache blocks give different '//trim(name))
+    if (maxval(abs(distributed - serial)) > tolerance * maxval(abs(distributed))) then
+      call fail('Distributed and serial runs give different '//trim(name))
     end if
 
     ! The current is the same at every interface, and opposite at the two contacts
@@ -119,7 +119,7 @@ contains
       end if
     end if
 
-  end subroutine check_moved_against_copied
+  end subroutine check_distributed_against_serial
 
 
   !> Compute the currents with the inelastic SCBA on an energy grid of nPoints points

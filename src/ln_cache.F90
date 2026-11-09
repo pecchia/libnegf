@@ -61,7 +61,8 @@ module ln_cache
     procedure(abst_add_matrix_dp), deferred :: add_dp
     procedure(abst_add_matrix_sp), deferred :: add_sp
     generic :: add => add_sp, add_dp
-    !> Store a dp matrix and free it. By default it is copied, then destroyed
+    !> Hand a dp matrix over to the cache and free it. By default it is copied
+    !> (converted, for a single-precision cache), then destroyed
     procedure :: move_dp => base_move_dp
     procedure(abst_retrieve_matrix_dp), deferred :: retrieve_dp
     procedure(abst_retrieve_matrix_sp), deferred :: retrieve_sp
