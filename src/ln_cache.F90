@@ -61,6 +61,8 @@ module ln_cache
     procedure(abst_add_matrix_dp), deferred :: add_dp
     procedure(abst_add_matrix_sp), deferred :: add_sp
     generic :: add => add_sp, add_dp
+    !> Store a dp matrix and free it. By default it is copied, then destroyed
+    procedure :: move_dp => base_move_dp
     procedure(abst_retrieve_matrix_dp), deferred :: retrieve_dp
     procedure(abst_retrieve_matrix_sp), deferred :: retrieve_sp
     generic :: retrieve => retrieve_sp, retrieve_dp
@@ -184,6 +186,9 @@ module ln_cache
     procedure :: in_range
     procedure :: add_sp => mem_add_sp
     procedure :: add_dp => mem_add_dp
+#:if not defined("SP_CACHE")
+    procedure :: move_dp => mem_move_dp
+#:endif
     procedure :: retrieve_sp => mem_retrieve_sp
     procedure :: retrieve_dp => mem_retrieve_dp
     procedure :: retrieve_pointer => mem_retrieve_pointer
@@ -355,6 +360,43 @@ contains
     end associate
 
   end subroutine mem_add_dp
+
+  !> Store a dp matrix in the cache and free it. This default copies the
+  !> matrix; caches holding the same precision in memory override it.
+  subroutine base_move_dp(this, matrix, label)
+    class(TMatrixCache) :: this
+    type(z_DNS) :: matrix
+    type(TMatLabel) :: label
+
+    call this%add_dp(matrix, label)
+    call destroy(matrix)
+  end subroutine base_move_dp
+
+#:if not defined("SP_CACHE")
+  !> Move a dp matrix into the cache without copying: it is left empty.
+  !> Any device copy must be released by the caller.
+  subroutine mem_move_dp(this, matrix, label)
+    class(TMatrixCacheMem) :: this
+    type(z_DNS) :: matrix
+    type(TMatLabel) :: label
+
+    integer :: b
+
+    call checks(this, label, b)
+    associate(p => this%MatArray(label%energy_point, label%kpoint, b, label%spin))
+      if (.not.associated(p%matrix)) allocate(p%matrix)
+      if (allocated(p%matrix%val)) call destroy(p%matrix)
+      call move_alloc(matrix%val, p%matrix%val)
+      p%matrix%nrow = matrix%nrow
+      p%matrix%ncol = matrix%ncol
+      p%energy = label%energy
+      p%kvec = label%kvec
+    end associate
+    matrix%nrow = 0
+    matrix%ncol = 0
+
+  end subroutine mem_move_dp
+#:endif
 
   subroutine mem_add_sp(this, matrix, label)
     class(TMatrixCacheMem) :: this

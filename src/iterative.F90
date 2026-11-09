@@ -71,6 +71,9 @@ module iterative
   type(z_DNS), dimension(:,:), allocatable :: Gr
   type(z_DNS), dimension(:,:), allocatable :: Gn
 
+  !> Gn is still in use and will be moved into the cache by cache_pending_Gn
+  logical :: tGnCachePending = .false.
+
   !! Introduce a new specific type:
   !type TBlockDense
   !  type(z_DNS), dimension(:,:), allocatable :: bl
@@ -371,7 +374,7 @@ CONTAINS
     type(z_CSR), intent(out), optional :: outGn
     type(z_CSR), intent(out), optional :: outGr
 
-    logical :: tDestroyGn, tDestroyESH, tDestroyGr
+    logical :: tDestroyGn, tDestroyESH, tDestroyGr, tMove
     integer :: outer
     type(z_CSR) :: csrGn
 
@@ -429,8 +432,16 @@ CONTAINS
     ! If the caller frees Gr afterwards (tDestroyGr, e.g. layer currents, DM),
     ! release each block as soon as it is cached: the dp Gr and its cached copy
     ! then overlap by one block only. Meir-Wingreen keeps Gr (tDestroyGr false).
-    call set_Gr_inel(negf, Gr, release=tDestroyGr)
-    call set_Gn_inel(negf, Gn)
+    ! With one (E,k) point per task the blocks are moved instead of copied.
+    tMove = can_move_to_cache(negf)
+    call set_Gr_inel(negf, Gr, release=tDestroyGr, move=tMove .and. tDestroyGr)
+    if (tMove .and. .not.tDestroyGn) then
+      ! The caller still reads Gn: iterative_layer_current and
+      ! iterative_meir_wingreen move it into the cache when they are done
+      tGnCachePending = .true.
+    else
+      call set_Gn_inel(negf, Gn, move=tMove)
+    end if
     call stop_timer(negf, timers%CacheG)
 
     ! Compared to previous code, this is trivially equivalent
@@ -444,6 +455,35 @@ CONTAINS
     call negf%scbaDriverElastic%destroy()
 
   end subroutine calculate_elastic_scba
+
+
+  !> The working blocks can be moved into the G_r/G_n caches, instead of copied,
+  !> only with one (E,k) point per task and with double-precision caches
+  function can_move_to_cache(negf) result(tMove)
+    type(Tnegf), intent(in) :: negf
+    logical :: tMove
+
+#:if defined("SP_CACHE")
+    tMove = .false.
+#:else
+    tMove = size(negf%local_k_index) == 1 .and. negf%local_en_points == 1
+#:endif
+
+  end function can_move_to_cache
+
+
+  !> Move Gn into the cache, if calculate_elastic_scba left this to the caller
+  subroutine cache_pending_Gn(negf)
+    type(Tnegf), intent(inout) :: negf
+
+    if (.not.tGnCachePending) return
+
+    call set_timer(negf, timers%CacheG)
+    call set_Gn_inel(negf, Gn, move=.true.)
+    call stop_timer(negf, timers%CacheG)
+    tGnCachePending = .false.
+
+  end subroutine cache_pending_Gn
 
   !---------------------------------------------------------------------
   !>
@@ -492,6 +532,7 @@ CONTAINS
       call destroy(A)
     end do
 
+    call cache_pending_Gn(negf)
     call destroy_all_blk(negf)
 
   end subroutine iterative_meir_wingreen
@@ -553,6 +594,7 @@ CONTAINS
       end do
     end if
 
+    call cache_pending_Gn(negf)
     call destroy_all_blk(negf)
 
   end subroutine iterative_layer_current
@@ -663,7 +705,7 @@ CONTAINS
   !--------------------------------------------------------------------------
   !> Store Gr
   !>
-  subroutine cache_Gr(negf, Gr, en_index, k_index, spin, tridiagonal, release)
+  subroutine cache_Gr(negf, Gr, en_index, k_index, spin, tridiagonal, release, move)
     class(TNegf) :: negf
     type(z_dns), dimension(:,:), intent(inout) :: Gr
     integer, intent(in), optional :: en_index
@@ -672,10 +714,12 @@ CONTAINS
     logical, intent(in), optional :: tridiagonal
     !> Free each block of Gr once it is cached
     logical, intent(in), optional :: release
+    !> Move each block into the cache instead of copying it
+    logical, intent(in), optional :: move
 
     type(TMatLabel) :: label
     integer :: ii, nbl, nKloc, nEloc
-    logical :: tTridiag, tRelease
+    logical :: tTridiag, tRelease, tMove
 
     if (.not.associated(negf%G_r)) then
        allocate(TMatrixCacheMem::negf%G_r)
@@ -711,6 +755,8 @@ CONTAINS
 
     tRelease = .false.
     if (present(release)) tRelease = release
+    tMove = .false.
+    if (present(move)) tMove = move
 
     ! store tri- diagonal blocks
     do ii = 1, size(Gr,1)
@@ -731,6 +777,14 @@ CONTAINS
     subroutine add_block(A)
       type(z_DNS), intent(inout) :: A
 
+      if (tMove) then
+#:if defined("GPU")
+        call deleteGPU(A)
+#:endif
+        call negf%G_r%move_dp(A, label)
+        return
+      end if
+
       call negf%G_r%add(A, label)
       if (tRelease) then
 #:if defined("GPU")
@@ -746,17 +800,19 @@ CONTAINS
   !--------------------------------------------------------------------------
   !> store Gn
   !>
-  subroutine cache_Gn(negf, Gn, en_index, k_index, spin, tridiagonal)
+  subroutine cache_Gn(negf, Gn, en_index, k_index, spin, tridiagonal, move)
     class(TNegf) :: negf
-    type(z_dns), dimension(:,:), intent(in) :: Gn
+    type(z_dns), dimension(:,:), intent(inout) :: Gn
     integer, intent(in), optional :: en_index
     integer, intent(in), optional :: k_index
     integer, intent(in), optional :: spin
     logical, intent(in), optional :: tridiagonal
+    !> Move each block into the cache instead of copying it
+    logical, intent(in), optional :: move
 
     type(TMatLabel) :: label
     integer :: ii, nbl, nKloc, nEloc
-    logical :: tTridiag
+    logical :: tTridiag, tMove
 
     if (.not.associated(negf%G_n)) then
        allocate(TMatrixCacheMem::negf%G_n)
@@ -789,17 +845,35 @@ CONTAINS
     !if (present(tridiagonal)) then
     !  tTridiag = tridiagonal
     !end if
+    tMove = .false.
+    if (present(move)) tMove = move
+
     ! Gn is Hermitian: store the diagonal and lower blocks only
     do ii = 1, size(Gn,1)
       label%row_block = ii
       label%col_block = ii
-      call negf%G_n%add(Gn(ii,ii), label)
+      call add_block(Gn(ii,ii))
       if (tTridiag .and. ii < size(Gn,1)) then
          label%row_block = ii + 1
          label%col_block = ii
-         call negf%G_n%add(Gn(ii+1,ii), label)
+         call add_block(Gn(ii+1,ii))
       end if
     end do
+
+  contains
+
+    subroutine add_block(A)
+      type(z_DNS), intent(inout) :: A
+
+      if (tMove) then
+#:if defined("GPU")
+        call deleteGPU(A)
+#:endif
+        call negf%G_n%move_dp(A, label)
+      else
+        call negf%G_n%add(A, label)
+      end if
+    end subroutine add_block
 
   end subroutine cache_Gn
 
@@ -827,11 +901,13 @@ CONTAINS
   end subroutine set_Gr_ela
 
 
-  subroutine set_Gr_inel(negf, Gr, release)
+  subroutine set_Gr_inel(negf, Gr, release, move)
     type(TNegf) :: negf
     type(z_DNS), intent(inout) :: Gr(:,:)
     !> Free each block of Gr once it is cached (see cache_Gr)
     logical, intent(in), optional :: release
+    !> Move each block into the cache instead of copying it
+    logical, intent(in), optional :: move
 
     integer :: iE, iK, iSpin
     type(TInteractionNode), pointer :: it
@@ -848,7 +924,7 @@ CONTAINS
       class is (TInelastic)
         if (doCacheGr) then
           ! cache Gr inside negf container only on first pass
-          call cache_Gr(negf, Gr, iE, iK, iSpin, release=release)
+          call cache_Gr(negf, Gr, iE, iK, iSpin, release=release, move=move)
           doCacheGr = .false.
         end if
         call pInter%set_Gr_pointer(negf%G_r)
@@ -881,9 +957,11 @@ CONTAINS
 
   end subroutine set_Gn_ela
 
-  subroutine set_Gn_inel(negf, Gn)
+  subroutine set_Gn_inel(negf, Gn, move)
     type(TNegf) :: negf
-    type(z_DNS), intent(in) :: Gn(:,:)
+    type(z_DNS), intent(inout) :: Gn(:,:)
+    !> Move each block into the cache instead of copying it
+    logical, intent(in), optional :: move
 
     integer :: iE, iK, iSpin
     type(TInteractionNode), pointer :: it
@@ -899,7 +977,7 @@ CONTAINS
       class is (TInelastic)
         if (doCacheGn) then
           ! cache Gn inside negf container only on first pass
-          call cache_Gn(negf, Gn, iE, iK, iSpin)
+          call cache_Gn(negf, Gn, iE, iK, iSpin, move=move)
           doCacheGn = .false.
         end if
         call pInter%set_Gn_pointer(negf%G_n)

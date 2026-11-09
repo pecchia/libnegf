@@ -229,7 +229,7 @@ module lib_param
 
     ! Energy grid information
     type(TEnGrid), dimension(:), allocatable :: en_grid
-    integer :: local_en_points    ! Local number of energy points
+    integer :: local_en_points = 0   ! Local number of energy points
 
     ! Array to store all k-points and k-weights
     real(dp), allocatable, dimension(:,:) :: kpoints
