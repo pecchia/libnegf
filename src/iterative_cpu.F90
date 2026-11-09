@@ -285,10 +285,17 @@ contains
     type(z_DNS), dimension(:,:), intent(inout) :: Gn
 
     !Work
-    type(z_DNS) :: work1, Ga
+    type(z_DNS) :: work1, Ga, GnUp
     integer :: i, nbl
 
     nbl = size(ESH,1)
+
+    ! Gn is Hermitian: only the diagonal and lower blocks are stored
+    call create_zero(Gn(1,1), ESH(1,1))
+    do i = 2, nbl
+      call create_zero(Gn(i,i), ESH(i,i))
+      call create_zero(Gn(i,i-1), ESH(i,i-1))
+    end do
 
     call zdagger(Gr(1,1), Ga)
     call prealloc_mult(Sigma_n(1,1), Ga, work1)
@@ -320,8 +327,7 @@ contains
         call prealloc_mult(gsmr(i+1), work1, Gn(i+1,i))
         call destroy(work1)
 
-        call destroy(Gn(i,i+1))
-        call zdagger(Gn(i+1,i), Gn(i,i+1))
+        call zdagger(Gn(i+1,i), GnUp)
 
         call zdagger(Gr(i+1,i), Ga)
         call prealloc_mult(Sigma_n(i+1,i), Ga, work1)
@@ -331,12 +337,23 @@ contains
         call prealloc_mult(Sigma_n(i+1,i+1), Ga, work1)
         call destroy(Ga)
 
-        call prealloc_mult(ESH(i+1,i), Gn(i,i+1), minusOne, work1)
+        call prealloc_mult(ESH(i+1,i), GnUp, minusOne, work1)
+        call destroy(GnUp)
 
         call prealloc_mult(gsmr(i+1), work1, Gn(i+1,i+1))
         call destroy(work1)
 
     end do
+
+  contains
+
+    subroutine create_zero(A, S)
+      type(z_DNS), intent(inout) :: A
+      type(z_DNS), intent(in) :: S
+
+      call create(A, S%nrow, S%ncol)
+      A%val = (0.0_dp, 0.0_dp)
+    end subroutine create_zero
 
   end subroutine calculate_Gn_tridiag_blocks
 

@@ -255,7 +255,6 @@ contains
     ! Sigma(i,i+1) = Sigma(i+1,i)^dag:
     ! Sigma(i,i) = Sigma(i,i) + Y Sigma(i+1,i+1) Y^dag - X - X^dag,  X = Y Sigma(i+1,i)
     ! 3 matrix products per block (Y is shared with gsmr; gns is never formed).
-    ! Sigma_n(i,i+1) is never uploaded.
     subroutine fold_sigma_n(Y, i)
       type(${MTYPE}$), intent(in) :: Y
       integer, intent(in) :: i
@@ -504,13 +503,11 @@ contains
     !    directly (negf%tKeepGronGPU), missing ones are uploaded on demand.
     !    Gr blocks are released from the GPU as soon as they are consumed.
     !  - Sigma_n: folded diag and lower blocks are expected on the GPU (left
-    !    there by gsmr). They are released once consumed. Sigma_n(i,i+1) is
-    !    never used.
+    !    there by gsmr). They are released once consumed.
     !  - gsmr(i+1) is released from the GPU once consumed.
-    !  - Gn blocks are allocated here on the host only (Gn must not be allocated
-    !    on entry). Each block lives on the GPU only while needed, is copied
-    !    to host and released. Gn(i,i+1) is never on the GPU: it is obtained
-    !    on host as Gn(i+1,i)^dag.
+    !  - Gn is Hermitian: only the diagonal and lower blocks are allocated, here
+    !    on the host only (Gn must not be allocated on entry). Each block lives
+    !    on the GPU only while needed, is copied to host and released.
     !  On exit Gn is on host only; Gr, gsmr, Sigma_n are not on the GPU.
     type(TNegf), intent(in) :: negf
     type(${MTYPE}$), dimension(:,:), intent(inout) :: ESH, Gr
@@ -530,7 +527,11 @@ contains
     hh = negf%hcublas
 
     ! Gn: host-only allocation; device copies are created block by block
-    call init_tridiag_blk(Gn, ESH)
+    call create_zero(Gn(1,1), ESH(1,1))
+    do i = 2, nbl
+      call create_zero(Gn(i,i), ESH(i,i))
+      call create_zero(Gn(i,i-1), ESH(i,i-1))
+    end do
 
     ! Gr * Sigma_n * Gr^+
     call uploadToGPU_if_absent(Sigma_n(1,1))
@@ -601,10 +602,9 @@ contains
 
         if (.not. negf%tKeepESHonGPU) call deleteGPU_async(ESH(i+1,i))
 
-        ! Gn(i+1,i) is final: move to host, Gn(i,i+1) from hermiticity
+        ! Gn(i+1,i) is final: move to host
         call copyFromGPU(Gn(i+1,i))
         call deleteGPU_async(Gn(i+1,i))
-        Gn(i,i+1)%val = conjg(transpose(Gn(i+1,i)%val))
 
         call createGPU_async(Gn(i+1,i+1))
         call matmul_gpu(hh, one, gsmr(i+1), work1, zero, Gn(i+1,i+1))
@@ -616,6 +616,16 @@ contains
     call deleteGPU_async(Gr(nbl,nbl))
     call copyFromGPU(Gn(nbl,nbl))
     call deleteGPU_async(Gn(nbl,nbl))
+
+  contains
+
+    subroutine create_zero(A, S)
+      type(${MTYPE}$), intent(inout) :: A
+      type(${MTYPE}$), intent(in) :: S
+
+      call create(A, S%nrow, S%ncol)
+      A%val = zero
+    end subroutine create_zero
 
   end subroutine calculate_Gn_tridiag_blocks_${KIND}$
 #:enddef calculate_Gn_tridiag_blocks_template

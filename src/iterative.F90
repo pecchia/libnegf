@@ -25,7 +25,7 @@ module iterative
   use ln_allocation
   use ln_messages
   use mat_def, only : z_DNS, z_CSR, r_CSR, create, destroy, clear, assignment(=)
-  use block_3_diag, only : init_tridiag_blk, destroy_tridiag_blk, blk2dns
+  use block_3_diag, only : destroy_tridiag_blk, blk2dns
   use block_3_diag, only : csr2blk3diag, clear_tridiag_blk
   use sparsekit_drv
   use inversions
@@ -294,14 +294,9 @@ CONTAINS
     !Computing device G_n
     call set_timer(negf, timers%Gn)
     call allocate_blk_dns(Gn,nbl)
-#:if defined("GPU")
-    ! GPU: Gn blocks are allocated (host only) inside calculate_Gn_tridiag_blocks
-    ! and returned on host. Gr, gsmr and Sigma_n device blocks are released
-    ! there as soon as consumed (Gr is on host already).
-#:else
-    call init_tridiag_blk(Gn,ESH)
-#:endif
-
+    ! The blocks of Gn (Hermitian: diagonal and lower only) are allocated inside
+    ! calculate_Gn_tridiag_blocks and returned on host. On GPU the Gr, gsmr and
+    ! Sigma_n device blocks are released there as soon as consumed.
     call calculate_Gn_tridiag_blocks(negf,ESH,Sigma_n,gsmr,Gr,Gn)
 
     call destroy_tridiag_blk(Sigma_n)
@@ -332,7 +327,7 @@ CONTAINS
 
     call set_timer(negf, timers%GtoCSR)
     if (present(Gnout)) then
-      call blk2csr(Gn,negf%str,negf%S,Gnout)
+      call blk2csr(Gn,negf%str,negf%S,Gnout,hermitian=.true.)
     end if
 
     if (present(Grout)) then
@@ -539,10 +534,11 @@ CONTAINS
     call stop_timer(negf, timers%BuildESH)
 
     ! J(ii) = Re{ i Tr[ESH(ii,ii+1) Gn(ii+1,ii) - Gn(ii,ii+1) ESH(ii+1,ii)] }
-    ! Only the traces are needed: O(n^2), no matrix products
+    ! With E real and H, S, Gn Hermitian the second trace is the complex
+    ! conjugate of the first: J(ii) = -2 Im Tr[ESH(ii,ii+1) Gn(ii+1,ii)]
+    ! Only the trace is needed: O(n^2), no matrix products
     do ii = 1, nbl-1
-      ecurr(ii) = real(i_unit * (trace_prod(ESH(ii,ii+1), Gn(ii+1,ii)) &
-          & - trace_prod(Gn(ii,ii+1), ESH(ii+1,ii))))
+      ecurr(ii) = -2.0_dp * aimag(trace_prod(ESH(ii,ii+1), Gn(ii+1,ii)))
     end do
     if (present(ledos)) then
       start = 0
@@ -632,9 +628,9 @@ CONTAINS
     call allocate_blk_dns(Sigma_n, nbl)
     ! Host-only allocation: block_3_diag::init_tridiag_blk would also allocate
     ! (unfilled) device copies, which uploadToGPU_if_absent would then never upload
+    ! Sigma_n is Hermitian: only the diagonal and lower blocks are stored
     call create_zero(Sigma_n(1,1), ESH(1,1))
     do j = 2, nbl
-      call create_zero(Sigma_n(j-1,j), ESH(j-1,j))
       call create_zero(Sigma_n(j,j), ESH(j,j))
       call create_zero(Sigma_n(j,j-1), ESH(j,j-1))
     end do
@@ -793,14 +789,12 @@ CONTAINS
     !if (present(tridiagonal)) then
     !  tTridiag = tridiagonal
     !end if
-    ! Store diagonal and upper diagonal
+    ! Gn is Hermitian: store the diagonal and lower blocks only
     do ii = 1, size(Gn,1)
       label%row_block = ii
       label%col_block = ii
       call negf%G_n%add(Gn(ii,ii), label)
       if (tTridiag .and. ii < size(Gn,1)) then
-         label%col_block = ii + 1
-         call negf%G_n%add(Gn(ii,ii+1), label)
          label%row_block = ii + 1
          label%col_block = ii
          call negf%G_n%add(Gn(ii+1,ii), label)
@@ -1190,7 +1184,7 @@ CONTAINS
   ! After calculate_gsmr_blocks(..., sigma_n=Sigma_n) the folded diagonal
   ! and lower blocks of Sigma_n live on the GPU, where
   ! calculate_Gn_tridiag_blocks uses them. Their host copies are stale (diagonal)
-  ! or no longer needed, and the upper blocks Sigma_n(i,i+1) are never used.
+  ! or no longer needed.
   ! Free the host storage and keep nrow/ncol, which the GPU routines need.
   ! Blocks without a device copy (nbl = 1: gsmr returns early) are kept.
   !**********************************************************************
@@ -1205,7 +1199,6 @@ CONTAINS
       call release(Sigma_n(i,i), c_associated(Sigma_n(i,i)%d_addr))
       if (i < nbl) then
         call release(Sigma_n(i+1,i), c_associated(Sigma_n(i+1,i)%d_addr))
-        call release(Sigma_n(i,i+1), .true.)
       end if
     end do
 
@@ -1550,14 +1543,20 @@ CONTAINS
   !      uncommented and all this part removed
   !If only one block is present, concatenation is not needed and it's implemented in a
   !more trivial way
-  subroutine blk2csr(G,struct,P,Gcsr)
+  subroutine blk2csr(G,struct,P,Gcsr,hermitian)
 
     type(z_DNS), dimension(:,:) :: G
     type(Tstruct_info), intent(in) :: struct
     type(z_CSR) :: Gcsr
     type(z_CSR) :: P
+    !> G is Hermitian and only its diagonal and lower blocks are stored
+    logical, intent(in), optional :: hermitian
 
     integer :: nbl, oldx, row, col, iy, ix, x, y, ii, jj, nrows
+    logical :: tHermitian
+
+    tHermitian = .false.
+    if (present(hermitian)) tHermitian = hermitian
 
     nbl = struct%num_PLs
     nrows = struct%mat_PL_end(nbl)
@@ -1616,7 +1615,9 @@ CONTAINS
 
         col = Gcsr%colind(jj) - indblk(y) + 1
 
-        if (allocated(G(x,y)%val)) THEN
+        if (tHermitian .and. y > x) then
+          Gcsr%nzval(jj) = Gcsr%nzval(jj) + conjg(G(y,x)%val(col,row))
+        else if (allocated(G(x,y)%val)) THEN
           Gcsr%nzval(jj) = Gcsr%nzval(jj) + G(x,y)%val(row,col)
         endif
 

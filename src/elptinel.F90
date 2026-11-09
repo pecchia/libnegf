@@ -468,14 +468,13 @@ contains
       call this%sigma_n%retrieve_pointer(tmp_blk, label)
       sigma(jj, jj)%val = sigma(jj, jj)%val + tmp_blk%val
       ! 3-diagonal blocks
-      ! Gn^dag = Gn => Sigma_n(i,j) = Sigma_n(j,i)^dag
+      ! Sigma_n is Hermitian: only the lower blocks are stored and used
       if (this%tTridiagonal) then
         if (jj .lt. npl) then
-          label%row_block = jj
-          label%col_block = jj + 1
+          label%row_block = jj + 1
+          label%col_block = jj
           call this%sigma_n%retrieve_pointer(tmp_blk, label)
-          sigma(jj, jj + 1)%val = sigma(jj, jj + 1)%val + tmp_blk%val
-          sigma(jj + 1, jj)%val = sigma(jj + 1, jj)%val + conjg(transpose(tmp_blk%val))
+          sigma(jj + 1, jj)%val = sigma(jj + 1, jj)%val + tmp_blk%val
         end if
       end if
     end do
@@ -749,17 +748,7 @@ contains
             PL_start = this%struct%mat_PL_start(ibl+1)
             Mp = this%struct%mat_PL_end(ibl+1) - PL_start + 1
 
-            ! Subdiag blocks
-            label%row_block = ibl
-            label%col_block = ibl + 1
-            if (.not.Sigma_n%is_cached(label)) then
-              call create(tmp,Np,Mp)
-              tmp%val = (0.0_lp, 0.0_lp)
-              call Sigma_n%add(tmp, label)
-              call destroy(tmp)
-            end if
-
-            ! Overdiag blocks
+            ! Lower blocks only: Sigma_n is Hermitian
             label%row_block = ibl + 1
             label%col_block = ibl
             if (.not.Sigma_n%is_cached(label)) then
@@ -791,6 +780,8 @@ contains
     integer :: iKK, PL_start, ir, ic
     complex(lp) :: fac_min, fac_plus
     type(TMatPointer), allocatable :: pGG(:,:), pSigma(:,:), pAA(:,:)
+    !> Upper block of G_n needed by the current product, built from the lower one
+    type(x_DNS), allocatable, target :: GnUpper(:)
     type(x_DNS), dimension(:,:), allocatable :: Pblk
     type(TMatLabel) :: label
 
@@ -868,6 +859,8 @@ contains
 
         call selfenergy(this%cart_comm, this%timerset, pGG, fac_min, fac_plus, iEshift, &
             & Pblk(iM,jM), Pblk(iMdag,jMdag), iKK, NE, NEloc, pSigma, this%prefactor)
+
+        call release_Gn_upper()
 
       end if
 
@@ -973,21 +966,47 @@ contains
     end subroutine setup_pointers_Gr
 
     ! setup the array of pointers to G_n
-    ! Only the current k-point iKK is set, as selfenergy uses only that column
+    ! Only the current k-point iKK is set, as selfenergy uses only that column.
+    ! G_n stores only the diagonal and lower blocks: an upper block is built
+    ! here as the conjugate transpose of the lower one, and freed after the product
     subroutine setup_pointers_Gn(Nr, Nc)
       integer, intent(in) :: Nr, Nc
 
       integer :: iE
+      type(x_DNS), pointer :: pLower
 
-      label%row_block = Nr
-      label%col_block = Nc
       label%kpoint = iKK
 
-      do iE = 1, NEloc
-        label%energy_point = iE
-        call this%G_n%retrieve_pointer(pGG(iE,iKK)%pMat, label)
-      end do
+      if (Nr >= Nc) then
+        label%row_block = Nr
+        label%col_block = Nc
+        do iE = 1, NEloc
+          label%energy_point = iE
+          call this%G_n%retrieve_pointer(pGG(iE,iKK)%pMat, label)
+        end do
+      else
+        label%row_block = Nc
+        label%col_block = Nr
+        allocate(GnUpper(NEloc))
+        do iE = 1, NEloc
+          label%energy_point = iE
+          call this%G_n%retrieve_pointer(pLower, label)
+          call create(GnUpper(iE), pLower%ncol, pLower%nrow)
+          GnUpper(iE)%val = conjg(transpose(pLower%val))
+          pGG(iE,iKK)%pMat => GnUpper(iE)
+        end do
+      end if
     end subroutine setup_pointers_Gn
+
+    subroutine release_Gn_upper()
+      integer :: iE
+
+      if (.not.allocated(GnUpper)) return
+      do iE = 1, size(GnUpper)
+        call destroy(GnUpper(iE))
+      end do
+      deallocate(GnUpper)
+    end subroutine release_Gn_upper
 
     ! Computes the spectral function blocks A(Nr,Nc) = i [G_r(Nr,Nc) - G_r(Nc,Nr)^dag]
     ! Note: zspectral cannot be used here since it computes i [G - G^dag] from a
@@ -1082,6 +1101,8 @@ contains
     type(TMatPointer), allocatable :: pGG(:,:), pSigma(:,:)
     type(x_DNS), dimension(:,:), allocatable :: Pblk
     type(TMatLabel) :: label
+    !> Upper block of G_n needed by the current product, built from the lower one
+    type(x_DNS), allocatable, target :: GnUpper(:)
 
     nbl = this%struct%num_PLs
     NKloc = this%nK
@@ -1106,7 +1127,7 @@ contains
         call compute_diagonal_contributions()
 
         if (this%tTridiagonal .and. ibl < nbl) then
-          call compute_supradiagonal_contributions()
+          call compute_subdiagonal_contributions()
         end if
 
       end do
@@ -1139,6 +1160,8 @@ contains
 
         call selfenergy(this%cart_comm, this%timerset, pGG, fac_min, fac_plus, iEshift, &
             & Pblk(iM,jM), Pblk(iMdag,jMdag), iKK, NE, NEloc, pSigma, this%prefactor)
+
+        call release_Gn_upper()
       end if
 
     end subroutine perform_block_product
@@ -1171,48 +1194,74 @@ contains
 
     end subroutine compute_diagonal_contributions
 
-    !> blocks for Sigma(ibl, ibl+1)
-    subroutine compute_supradiagonal_contributions()
+    !> blocks for Sigma(ibl+1, ibl). Sigma_n is Hermitian: the upper blocks are not stored
+    subroutine compute_subdiagonal_contributions()
 
-      call setup_pointers_Sigma_n(ibl, ibl+1)
+      call setup_pointers_Sigma_n(ibl+1, ibl)
 
-      ! M(i,i)G(i,i)M(i,i+1)
-      call perform_block_product(ibl,ibl, ibl,ibl, ibl,ibl+1)
-      ! M(i,i+1)G(i+1,i+1)M(i+1,i+1)
-      call perform_block_product(ibl,ibl+1, ibl+1,ibl+1, ibl+1,ibl+1)
-      ! M(i,i)G(i,i+1)M(i+1,i+1)
-      call perform_block_product(ibl,ibl, ibl,ibl+1, ibl+1,ibl+1)
-      ! M(i,i+1)G(i+1,i)M(i,i+1)
-      call perform_block_product(ibl,ibl+1, ibl+1,ibl, ibl,ibl+1)
-
-      if (ibl > 1) then
-        ! M(i,i-1)G(i-1,i)M(i,i+1)
-        call perform_block_product(ibl,ibl-1, ibl-1,ibl, ibl,ibl+1)
-      end if
+      ! M(i+1,i)G(i,i)M(i,i)
+      call perform_block_product(ibl+1,ibl, ibl,ibl, ibl,ibl)
+      ! M(i+1,i+1)G(i+1,i+1)M(i+1,i)
+      call perform_block_product(ibl+1,ibl+1, ibl+1,ibl+1, ibl+1,ibl)
+      ! M(i+1,i+1)G(i+1,i)M(i,i)
+      call perform_block_product(ibl+1,ibl+1, ibl+1,ibl, ibl,ibl)
+      ! M(i+1,i)G(i,i+1)M(i+1,i)
+      call perform_block_product(ibl+1,ibl, ibl,ibl+1, ibl+1,ibl)
 
       if (ibl < nbl-1) then
-        ! M(i,i+1)G(i+1,i+2)M(i+2,i+1)
-        call perform_block_product(ibl,ibl+1, ibl+1,ibl+2, ibl+2,ibl+1)
+        ! M(i+1,i+2)G(i+2,i+1)M(i+1,i)
+        call perform_block_product(ibl+1,ibl+2, ibl+2,ibl+1, ibl+1,ibl)
       end if
 
-    end subroutine compute_supradiagonal_contributions
+      if (ibl > 1) then
+        ! M(i+1,i)G(i,i-1)M(i-1,i)
+        call perform_block_product(ibl+1,ibl, ibl,ibl-1, ibl-1,ibl)
+      end if
+
+    end subroutine compute_subdiagonal_contributions
 
     ! setup the array of pointers to G_n
-    ! Only the current k-point iKK is set, as selfenergy uses only that column
+    ! Only the current k-point iKK is set, as selfenergy uses only that column.
+    ! G_n stores only the diagonal and lower blocks: an upper block is built
+    ! here as the conjugate transpose of the lower one, and freed after the product
     subroutine setup_pointers_Gn(Nr, Nc)
       integer, intent(in) :: Nr, Nc
 
       integer :: iE
+      type(x_DNS), pointer :: pLower
 
-      label%row_block = Nr
-      label%col_block = Nc
       label%kpoint = iKK
 
-      do iE = 1, NEloc
-        label%energy_point = iE
-        call this%G_n%retrieve_pointer(pGG(iE,iKK)%pMat, label)
-      end do
+      if (Nr >= Nc) then
+        label%row_block = Nr
+        label%col_block = Nc
+        do iE = 1, NEloc
+          label%energy_point = iE
+          call this%G_n%retrieve_pointer(pGG(iE,iKK)%pMat, label)
+        end do
+      else
+        label%row_block = Nc
+        label%col_block = Nr
+        allocate(GnUpper(NEloc))
+        do iE = 1, NEloc
+          label%energy_point = iE
+          call this%G_n%retrieve_pointer(pLower, label)
+          call create(GnUpper(iE), pLower%ncol, pLower%nrow)
+          GnUpper(iE)%val = conjg(transpose(pLower%val))
+          pGG(iE,iKK)%pMat => GnUpper(iE)
+        end do
+      end if
     end subroutine setup_pointers_Gn
+
+    subroutine release_Gn_upper()
+      integer :: iE
+
+      if (.not.allocated(GnUpper)) return
+      do iE = 1, size(GnUpper)
+        call destroy(GnUpper(iE))
+      end do
+      deallocate(GnUpper)
+    end subroutine release_Gn_upper
 
     ! setup the array of pointers to Sigma_n
     ! Only the current k-point iKK is set, as selfenergy uses only that column

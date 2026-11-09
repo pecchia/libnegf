@@ -795,14 +795,13 @@ contains
       call this%sigma_n%retrieve_pointer(tmp_blk, label)
       sigma(jj, jj)%val = sigma(jj, jj)%val + tmp_blk%val
       ! 3-diagonal blocks
-      ! Gn^dag = Gn => Sigma_n(i,j) = Sigma_n(j,i)^dag
+      ! Sigma_n is Hermitian: only the lower blocks are stored and used
       if (this%tTridiagonal) then
         if (jj .lt. npl) then
-          label%row_block = jj
-          label%col_block = jj + 1
+          label%row_block = jj + 1
+          label%col_block = jj
           call this%sigma_n%retrieve_pointer(tmp_blk, label)
-          sigma(jj, jj + 1)%val = sigma(jj, jj + 1)%val + tmp_blk%val
-          sigma(jj + 1, jj)%val = sigma(jj + 1, jj)%val + conjg(transpose(tmp_blk%val))
+          sigma(jj + 1, jj)%val = sigma(jj + 1, jj)%val + tmp_blk%val
         end if
       end if
     end do
@@ -1047,17 +1046,7 @@ contains
             PL_start = this%struct%mat_PL_start(ibl+1)
             Mp = this%struct%mat_PL_end(ibl+1) - PL_start + 1
 
-            ! Subdiag blocks
-            label%row_block = ibl
-            label%col_block = ibl + 1
-            if (.not.Sigma_n%is_cached(label)) then
-              call create(tmp,Np,Mp)
-              tmp%val = (0.0_dp, 0.0_dp)
-              call Sigma_n%add(tmp, label)
-              call destroy(tmp)
-            end if
-
-            ! Overdiag blocks
+            ! Lower blocks only: Sigma_n is Hermitian
             label%row_block = ibl + 1
             label%col_block = ibl
             if (.not.Sigma_n%is_cached(label)) then
@@ -1092,6 +1081,8 @@ contains
     integer, allocatable :: izr(:), izc(:)
     type(TMatLabel) :: label
     integer :: transDir
+    !> Upper block of G_n needed by the current product, built from the lower one
+    type(x_DNS), allocatable, target :: GnUpper(:,:)
 
     transDir = this%basis%transportDirection
     nbl = this%struct%num_PLs
@@ -1187,6 +1178,7 @@ contains
 
         call selfenergy(this%cart_comm, this%timerset, pGG, fac_min, fac_plus, iEshift, &
                           & izr, izc, this%Kmat, NK, NKloc, NE, NEloc, this%kindices, pSigma)
+        call release_Gn_upper()
 
         ! -------------------- subdiagonal blocks -----------------------------------------------------
         label%row_block = ibl + 1
@@ -1237,16 +1229,50 @@ contains
     end subroutine setup_pointers_Gr
 
     ! setup the array of pointers to G_n
+    ! G_n stores only the diagonal and lower blocks: an upper block is built
+    ! here as the conjugate transpose of the lower one, and freed after the product
     subroutine setup_pointers_Gn()
-      do iK = 1, NKloc
-        do iE = 1, NEloc
-          label%kpoint = iK
-          label%energy_point = iE
-          call this%G_n%retrieve_pointer(pGG(iE,iK)%pMat, label)
+      integer :: rowBlock, colBlock
+      type(x_DNS), pointer :: pLower
+
+      rowBlock = label%row_block
+      colBlock = label%col_block
+
+      if (rowBlock >= colBlock) then
+        do iK = 1, NKloc
+          do iE = 1, NEloc
+            label%kpoint = iK
+            label%energy_point = iE
+            call this%G_n%retrieve_pointer(pGG(iE,iK)%pMat, label)
+          end do
         end do
-      end do
+      else
+        label%row_block = colBlock
+        label%col_block = rowBlock
+        allocate(GnUpper(NEloc,NKloc))
+        do iK = 1, NKloc
+          do iE = 1, NEloc
+            label%kpoint = iK
+            label%energy_point = iE
+            call this%G_n%retrieve_pointer(pLower, label)
+            call create(GnUpper(iE,iK), pLower%ncol, pLower%nrow)
+            GnUpper(iE,iK)%val = conjg(transpose(pLower%val))
+            pGG(iE,iK)%pMat => GnUpper(iE,iK)
+          end do
+        end do
+        label%row_block = rowBlock
+        label%col_block = colBlock
+      end if
     end subroutine setup_pointers_Gn
 
+    subroutine release_Gn_upper()
+      do iK = 1, NKloc
+        do iE = 1, NEloc
+          call destroy(GnUpper(iE,iK))
+        end do
+      end do
+      deallocate(GnUpper)
+    end subroutine release_Gn_upper
 
     subroutine setup_pointers_Sigma_r(Nr,Nc)
       integer, intent(in) :: Nr, Nc
@@ -1359,7 +1385,7 @@ contains
 
       !call check_elements(this%Sigma_n,"Sigma_n")
       ! ==================================================================================================
-      !   UPPER TRI- DIAGONAL BLOCKS
+      !   LOWER TRI- DIAGONAL BLOCKS (Sigma_n and Gn are Hermitian, the upper blocks are not stored)
       ! ==================================================================================================
       if (this%tTridiagonal .and. ibl < nbl) then
         PL_start = this%struct%mat_PL_start(ibl+1)
@@ -1370,19 +1396,19 @@ contains
           izc(ii) = nint(this%basis%x(transDir, this%basis%matrixToBasis(PL_start+ii-1))/this%dz)
         end do
 
-        ! -------------------- supradiagonal blocks -----------------------------------------------------
-        label%row_block = ibl
-        label%col_block = ibl + 1
+        ! -------------------- subdiagonal blocks -------------------------------------------------------
+        label%row_block = ibl + 1
+        label%col_block = ibl
 
         call setup_pointers_Gn()
-        call setup_pointers_Sigma_n(Np,Mp)
+        call setup_pointers_Sigma_n(Mp,Np)
 
         ! Compute the retarded part
         fac_min = cmplx(this%Nq, 0.0, dp)
         fac_plus = cmplx(this%Nq + 1, 0.0, dp)
 
         call selfenergy(this%cart_comm, this%timerset, pGG, fac_min, fac_plus, iEshift, &
-                          & izr, izc, this%Kmat, NK, NKloc, NE, NEloc, this%kindices, pSigma)
+                          & izc, izr, this%Kmat, NK, NKloc, NE, NEloc, this%kindices, pSigma)
 
         call log_deallocate(izc)
       end if
