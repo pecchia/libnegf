@@ -316,6 +316,13 @@ CONTAINS
     call trimMemPool()
 #:endif
 
+    ! ESH is not needed after Gn: Meir-Wingreen uses only Gr, Gn and the contact
+    ! self-energies, the layer currents rebuild ES-H without self-energies
+    ! (iterative_layer_current), the next elastic SCBA iteration rebuilds it.
+    ! Freeing it here lowers the host memory peak while Gr/Gn are cached.
+    call destroy_tridiag_blk(ESH)
+    call deallocate_blk_dns(ESH)
+
     call destroy_gsm(gsmr)
     call deallocate_gsm(gsmr)
 
@@ -424,7 +431,10 @@ CONTAINS
     enddo
 
     call set_timer(negf, timers%CacheG)
-    call set_Gr_inel(negf, Gr)
+    ! If the caller frees Gr afterwards (tDestroyGr, e.g. layer currents, DM),
+    ! release each block as soon as it is cached: the dp Gr and its cached copy
+    ! then overlap by one block only. Meir-Wingreen keeps Gr (tDestroyGr false).
+    call set_Gr_inel(negf, Gr, release=tDestroyGr)
     call set_Gn_inel(negf, Gn)
     call stop_timer(negf, timers%CacheG)
 
@@ -657,17 +667,19 @@ CONTAINS
   !--------------------------------------------------------------------------
   !> Store Gr
   !>
-  subroutine cache_Gr(negf, Gr, en_index, k_index, spin, tridiagonal)
+  subroutine cache_Gr(negf, Gr, en_index, k_index, spin, tridiagonal, release)
     class(TNegf) :: negf
-    type(z_dns), dimension(:,:), intent(in) :: Gr
+    type(z_dns), dimension(:,:), intent(inout) :: Gr
     integer, intent(in), optional :: en_index
     integer, intent(in), optional :: k_index
     integer, intent(in), optional :: spin
     logical, intent(in), optional :: tridiagonal
+    !> Free each block of Gr once it is cached
+    logical, intent(in), optional :: release
 
     type(TMatLabel) :: label
     integer :: ii, nbl, nKloc, nEloc
-    logical :: tTridiag
+    logical :: tTridiag, tRelease
 
     if (.not.associated(negf%G_r)) then
        allocate(TMatrixCacheMem::negf%G_r)
@@ -701,19 +713,37 @@ CONTAINS
     !  tTridiag = tridiagonal
     !end if
 
+    tRelease = .false.
+    if (present(release)) tRelease = release
+
     ! store tri- diagonal blocks
     do ii = 1, size(Gr,1)
       label%row_block = ii
       label%col_block = ii
-      call negf%G_r%add(Gr(ii,ii), label)
+      call add_block(Gr(ii,ii))
       if (tTridiag .and. ii < size(Gr,1)) then
          label%col_block = ii + 1
-         call negf%G_r%add(Gr(ii,ii+1), label)
+         call add_block(Gr(ii,ii+1))
          label%row_block = ii + 1
          label%col_block = ii
-         call negf%G_r%add(Gr(ii+1,ii), label)
+         call add_block(Gr(ii+1,ii))
       end if
     end do
+
+  contains
+
+    subroutine add_block(A)
+      type(z_DNS), intent(inout) :: A
+
+      call negf%G_r%add(A, label)
+      if (tRelease) then
+#:if defined("GPU")
+        call destroyAll(A)
+#:else
+        call destroy(A)
+#:endif
+      end if
+    end subroutine add_block
 
   end subroutine cache_Gr
 
@@ -803,9 +833,11 @@ CONTAINS
   end subroutine set_Gr_ela
 
 
-  subroutine set_Gr_inel(negf, Gr)
+  subroutine set_Gr_inel(negf, Gr, release)
     type(TNegf) :: negf
-    type(z_DNS), intent(in) :: Gr(:,:)
+    type(z_DNS), intent(inout) :: Gr(:,:)
+    !> Free each block of Gr once it is cached (see cache_Gr)
+    logical, intent(in), optional :: release
 
     integer :: iE, iK, iSpin
     type(TInteractionNode), pointer :: it
@@ -822,7 +854,7 @@ CONTAINS
       class is (TInelastic)
         if (doCacheGr) then
           ! cache Gr inside negf container only on first pass
-          call cache_Gr(negf, Gr, iE, iK, iSpin)
+          call cache_Gr(negf, Gr, iE, iK, iSpin, release=release)
           doCacheGr = .false.
         end if
         call pInter%set_Gr_pointer(negf%G_r)
