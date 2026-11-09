@@ -62,6 +62,7 @@ module iterative
   public :: transmission_BP_corrected
 
   public :: destroy_all_blk
+  public :: blk2csr
   public :: clear_all_blk
 
   logical, parameter :: debug=.false.

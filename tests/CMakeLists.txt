@@ -25,11 +25,14 @@ set(test-directories
     f90int_file
     f90_transmission
     f90elph_deph
+    f90inel_layer_current
     f90read_hs
     f90sgf_cache
     f90Si2x2
     f90Si_nin
     f90Si_nin_40pl
+    unit_tests/ln_cache_move
+    unit_tests/blk2csr_hermitian
 )
 
 if(WITH_TRANSPORT_GPU)
