@@ -100,6 +100,7 @@ module integrations
  ! ////////////////////////////////////////////////////////////
 
  integer, PARAMETER :: VBT=70
+ integer, PARAMETER :: VBT_MEM=100
 
 
 
@@ -2464,6 +2465,8 @@ contains
     character(*), intent(in) :: where
 
     character(64) :: tag
+
+    if (negf%verbose <= VBT_MEM) return
 
     write(tag, '(a,i0,a,a)') 'SCBA ', scba_iter, ' ', where
     call printMemInfo(negf%cartComm%rank, tag)
