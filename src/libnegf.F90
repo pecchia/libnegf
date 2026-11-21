@@ -196,8 +196,11 @@ module libnegf
    !>--------------------------------------------------------------------
    !!  Read H and S from file
    !!  @param[in] negf: libnegf container instance
-   !!  @param[in] real_path (string): filename for real part of target matrix in PETSC format
-   !!  @param[in] imag_path (string): filename for imaginary part of target matrix in PETSC format.
+   !!  @param[in] real_path (string): filename for real part of target matrix, in PETSc
+   !!      format or Matrix Market coordinate format (detected from the
+   !!      '%%MatrixMarket' banner). A complex Matrix Market file holds the whole matrix.
+   !!  @param[in] imag_path (string): filename for imaginary part of target matrix
+   !!      (same format as real_path). Empty string: imaginary part is zero.
    !!  @param[in] target_matrix (integer): controlo flag which specify if the Hamiltonian
    !!      or the Overlap is parsed. 0 for the Hamiltonian, 1 for the Overlap
    !!      formatted (logical, optional): true (default) if file is formatted.
@@ -211,7 +214,8 @@ module libnegf
      logical, intent(in), optional :: formatted
 
      logical :: formatted_opt
-     logical :: doesexist
+     logical :: doesexist, has_imag
+     integer :: idI
      character(11) :: fmtstring
      type(format) :: fmt
 
@@ -229,34 +233,104 @@ module libnegf
        fmt%formatted = .false.
      endif
 
-     fmt%type = 'PETSc'  !! only PETSc now supported here. Maybe need to add support for UPT?
+     fmt%type = 'PETSc'
      fmt%fmt = 'F'       !! only Full matrix supported. We could also support upper or lower
 
+     ! An empty imaginary filename means a real matrix (imaginary part = 0)
+     has_imag = len_trim(imag_path) > 0
+
      inquire(file=trim(real_path), exist= doesexist)
-     inquire(file=trim(imag_path), exist= doesexist)
      if (.not.doesexist) then
-       call error_msg( "libNEGF error. Matrix files not found")
+       call error_msg( "libNEGF error. Matrix file not found: "//trim(real_path))
+     endif
+     if (has_imag) then
+       inquire(file=trim(imag_path), exist= doesexist)
+       if (.not.doesexist) then
+         call error_msg( "libNEGF error. Matrix file not found: "//trim(imag_path))
+       endif
      endif
 
-     open(401, file=real_path, form=trim(fmtstring))
-     open(402, file=imag_path, form=trim(fmtstring))
+     open(401, file=trim(real_path), form=trim(fmtstring))
+     ! Matrix Market files are recognised from their '%%MatrixMarket' banner
+     if (formatted_opt) then
+       if (is_matrix_market(401)) fmt%type = 'MM'
+     end if
+     idI = -1
+     if (has_imag) then
+       open(402, file=trim(imag_path), form=trim(fmtstring))
+       idI = 402
+     end if
 
      call create_HS(negf, 1)
      if (target_matrix.eq.0) then
        if (.not.associated(negf%HS(1)%H)) allocate(negf%HS(1)%H)
-       call read_H(401,402,negf%HS(1)%H,fmt)
+       call read_H(401,idI,negf%HS(1)%H,fmt)
        negf%H => negf%HS(1)%H
      else if (target_matrix.eq.1) then
        if (.not.associated(negf%HS(1)%S)) allocate(negf%HS(1)%S)
-       call read_H(401,402,negf%HS(1)%S,fmt)
+       call read_H(401,idI,negf%HS(1)%S,fmt)
        negf%S => negf%HS(1)%S
      else
        call error_msg( "libNEGF error. Wrong target_matrix: must be 0 (H) or 1 (S)")
      endif
      close(401)
-     close(402)
+     if (has_imag) close(402)
 
    end subroutine read_HS
+
+  !-------------------------------------------------------------------
+  !> Pad H and S of HS(iHS) with explicit zeros so that both share the
+  !! same (union) sparsity pattern, with identical column ordering.
+  !! Needed when H and S come from independent sources (e.g. files),
+  !! since ES-H is built assuming identical patterns.
+  subroutine pad_HS_pattern(negf, iHS)
+    type(Tnegf) :: negf
+    integer, intent(in) :: iHS
+
+    type(z_CSR) :: tmp
+
+    if (.not.associated(negf%HS(iHS)%H) .or. .not.associated(negf%HS(iHS)%S)) return
+
+    associate(H => negf%HS(iHS)%H, S => negf%HS(iHS)%S)
+      if (H%nrow /= S%nrow .or. H%ncol /= S%ncol) then
+        call error_msg("libNEGF error. H and S have different sizes")
+      end if
+
+      ! tmp = H + 0*S : union pattern (H entries first, then extra S entries)
+      call prealloc_sum(H, S, one, zero, tmp)
+      call move_csr(tmp, H)
+      ! tmp = 0*H + S : H already holds all of S's pattern, so the result
+      ! has exactly H's pattern and ordering
+      call prealloc_sum(H, S, zero, one, tmp)
+      call move_csr(tmp, S)
+
+      H%sorted = .false.
+      S%sorted = .false.
+      call msort(H)
+      call msort(S)
+
+      if (H%nnz /= S%nnz) then
+        call error_msg("libNEGF error. pad_HS_pattern: H and S nnz differ after padding")
+      end if
+    end associate
+
+  contains
+
+    !> Replace dst with src, moving storage (src is left empty)
+    subroutine move_csr(src, dst)
+      type(z_CSR), intent(inout) :: src, dst
+      call destroy(dst)
+      dst%nrow = src%nrow
+      dst%ncol = src%ncol
+      dst%nnz = src%nnz
+      dst%sorted = src%sorted
+      call move_alloc(src%nzval, dst%nzval)
+      call move_alloc(src%colind, dst%colind)
+      call move_alloc(src%rowpnt, dst%rowpnt)
+      src%nnz = 0
+    end subroutine move_csr
+
+  end subroutine pad_HS_pattern
 
   !-------------------------------------------------------------------
   !> Create the HS container for k-dependent H(k) and S(k)
@@ -1291,9 +1365,12 @@ module libnegf
     if (trim(file_re_S).ne.'memory') then
       if (trim(file_re_S).eq.'identity') then
          call set_S_id(negf, negf%H%nrow, 1)
+      else
+         call read_HS(negf, file_re_S, file_im_S, 1)
+         ! H and S read from file may have different sparsity patterns,
+         ! while ES-H assumes they coincide: pad both to the union.
+         call pad_HS_pattern(negf, 1)
       end if
-    else
-      call read_HS(negf, file_re_S, file_im_S, 1)
     end if
 
     !! A dummy descriptor must be present at the beginning of each line
